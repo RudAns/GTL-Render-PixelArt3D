@@ -1,0 +1,53 @@
+// Integer-scale upscale of the inner window of the low-res render.
+// Output pixel p maps to inner texel floor(p / Scale); the camera-snap remainder (SubTexel) shifts the
+// sampled window by a fraction of a texel so camera motion stays smooth while every rendered texel
+// stays locked to the world-aligned grid. Pixels outside Inner * Scale are letterboxed.
+
+#include "/Engine/Private/Common.ush"
+
+Texture2D InputTexture;
+SamplerState PointSampler;
+SamplerState LinearSampler;
+float2 InputExtentInv;
+float2 RectMin;
+float2 InnerOffset;
+float2 InnerSize;
+float2 OutputMin;
+float2 Pad;
+float2 SubTexel;
+float Scale;
+float UseBilinear;
+float ShowGrid;
+
+void MainPS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	const float2 P = SvPosition.xy - OutputMin - Pad;
+	const float2 T = P / Scale;
+	if (any(T < 0.0) || any(T >= InnerSize))
+	{
+		OutColor = float4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+
+	const float2 Src = T + InnerOffset + SubTexel;
+	float3 C;
+	if (UseBilinear > 0.5)
+	{
+		C = InputTexture.SampleLevel(LinearSampler, (RectMin + Src) * InputExtentInv, 0).rgb;
+	}
+	else
+	{
+		C = InputTexture.SampleLevel(PointSampler, (RectMin + floor(Src) + 0.5) * InputExtentInv, 0).rgb;
+	}
+
+	if (ShowGrid > 0.5 && Scale >= 3.0)
+	{
+		const float2 F = frac(Src);
+		const float W = 1.0 / Scale;
+		if (F.x < W || F.y < W)
+		{
+			C *= 0.72;
+		}
+	}
+	OutColor = float4(C, 1.0);
+}
