@@ -71,6 +71,15 @@ void APixelCharacter::BeginPlay()
 	// axis (mesh X) and tilted up 25 degrees, so walking along a wall pushes one end into it.
 	SpearShaft->SetRelativeScale3D(FVector(0.09f, 0.09f, 2.8f));
 	SpearShaft->SetRelativeLocationAndRotation(FVector(0.f, -22.f, 78.f), FRotator(-65.f, 0.f, 0.f));
+	// Hang it on the chest bone so it bobs and snaps with the body instead of floating on the root.
+	const FName Chest(TEXT("chest"));
+	if (SkMesh->DoesSocketExist(Chest))
+	{
+		const FTransform OnRoot = SpearShaft->GetRelativeTransform();
+		const FTransform ChestCS = SkMesh->GetSocketTransform(Chest, RTS_Component);
+		SpearShaft->AttachToComponent(SkMesh, FAttachmentTransformRules::KeepRelativeTransform, Chest);
+		SpearShaft->SetRelativeTransform(OnRoot.GetRelativeTransform(ChestCS));
+	}
 	SpearTip->SetRelativeScale3D(FVector(2.0f, 2.0f, 0.1f));
 	SpearTip->SetRelativeLocation(FVector(0, 0, 53.f));
 
@@ -112,7 +121,15 @@ void APixelCharacter::Tick(float DeltaSeconds)
 		const double T = Sub->Camera.Texel;
 		const FVector2d Pt(FVector::DotProduct(World, R) / T, FVector::DotProduct(World, U) / T);
 		const FVector2d V(FVector::DotProduct(GetVelocity(), R), FVector::DotProduct(GetVelocity(), U));
-		FVector2d Snapped(FMath::RoundToDouble(Pt.X), FMath::RoundToDouble(Pt.Y));
+		// Hysteresis (step once 0.9 texel behind): at 30 texels/s and 60 fps the position then steps on every
+		// 2nd frame exactly, instead of drifting into an occasional 3-frame gap that reads as a stutter.
+		if (!bHasShown || FMath::Abs(Pt.X - ShownTexel.X) > 1.5 || FMath::Abs(Pt.Y - ShownTexel.Y) > 1.5)
+		{
+			ShownTexel = FVector2d(FMath::RoundToDouble(Pt.X), FMath::RoundToDouble(Pt.Y)); bHasShown = true;
+		}
+		if (FMath::Abs(Pt.X - ShownTexel.X) >= 0.9) ShownTexel.X = FMath::RoundToDouble(Pt.X);
+		if (FMath::Abs(Pt.Y - ShownTexel.Y) >= 0.9) ShownTexel.Y = FMath::RoundToDouble(Pt.Y);
+		FVector2d Snapped = ShownTexel;
 		static const bool bOld = FParse::Param(FCommandLine::Get(), TEXT("PixelOldMove"));
 		const bool bDiagonal = !bOld && V.Size() > 20.0 && FMath::Abs(FMath::Abs(V.X) - FMath::Abs(V.Y)) < 0.15 * V.Size();
 		if (bDiagonal)
@@ -122,10 +139,12 @@ void APixelCharacter::Tick(float DeltaSeconds)
 			auto Across = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.Y - (Pt.Y - A.Y) * Dir.X) * 0.5; };
 			if (!bDiagonalAnchored || Dir != DiagonalDir || FMath::Abs(Across(DiagonalAnchor)) > 0.6)
 			{
-				DiagonalAnchor = Snapped; DiagonalDir = Dir; bDiagonalAnchored = true;
+				DiagonalAnchor = Snapped; DiagonalDir = Dir; bDiagonalAnchored = true; DiagonalK = 0.0;
 			}
-			const double K = FMath::RoundToDouble(Along(DiagonalAnchor));
-			Snapped = DiagonalAnchor + FVector2d(K * Dir.X, K * Dir.Y);
+			const double Al = Along(DiagonalAnchor);
+			if (FMath::Abs(Al - DiagonalK) >= 0.9) DiagonalK = FMath::RoundToDouble(Al);
+			Snapped = DiagonalAnchor + FVector2d(DiagonalK * Dir.X, DiagonalK * Dir.Y);
+			ShownTexel = Snapped;
 		}
 		else
 		{

@@ -38,6 +38,7 @@ struct FPixelAnimProxy : public FAnimInstanceProxy
 	FVector CamRight = FVector::RightVector;
 	FVector CamUp = FVector::UpVector;
 	double Texel = 6.25;
+	TMap<int32, FVector2d> ShownOffset; // per joint: texel offset from the root currently shown (hysteresis)
 };
 
 UCLASS(Transient)

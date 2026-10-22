@@ -16,6 +16,12 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "UnrealClient.h"
+#include "ImageUtils.h"
+#include "ImageCore.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "DrawDebugHelpers.h"
 
 namespace
@@ -532,6 +538,27 @@ void UPixelArtSubsystem::UpdateMaterialParameters()
 
 void UPixelArtSubsystem::MeasureFlicker()
 {
+	// -PixelFrameDump=<dir>: while the motion probe runs, save every displayed low-res frame as a PNG
+	// (exactly what the upscaler shows, before scaling), for frame-by-frame inspection of motion.
+	static FString DumpDir;
+	static const bool bDump = FParse::Value(FCommandLine::Get(), TEXT("PixelFrameDump="), DumpDir);
+	if (bDump)
+	{
+		PixelArtRender::SetTexelReadback(bMotionProbe || bMeasureFlicker);
+		TArray<FColor> Px; FIntPoint Sz; uint64 Fr = 0;
+		while (PixelArtRender::FetchTexels(Px, Sz, &Fr))
+		{
+			if (!bMotionProbe) continue;
+			TArray64<uint8> Png;
+			FImageView View(Px.GetData(), Sz.X, Sz.Y);
+			if (FImageUtils::CompressImage(Png, TEXT("png"), View))
+			{
+				FFileHelper::SaveArrayToFile(Png, *FPaths::Combine(DumpDir, FString::Printf(TEXT("f%06llu.png"), Fr)));
+			}
+		}
+		return;
+	}
+
 	// Reads the displayed low-res texels back from the GPU (before upscaling) and compares each new frame
 	// with the previous one after the best integer shift, exactly like the measurement in the report (ch.03).
 	PixelArtRender::SetTexelReadback(bMeasureFlicker && Settings.bLowRes);

@@ -44,11 +44,17 @@ IMPLEMENT_GLOBAL_SHADER(FPixelUpscalePS, "/PixelArt3D/PixelUpscale.usf", "MainPS
 
 namespace
 {
-	// Render-thread readback of the displayed inner window (flicker meter).
-	TUniquePtr<FRHIGPUTextureReadback> GReadback;
-	FIntRect GReadbackRect;
-	EPixelFormat GReadbackFormat = PF_Unknown;
-	bool GReadbackPending = false;
+	// Render-thread readbacks of the displayed inner window (flicker meter, frame dumps). A small ring, so
+	// every rendered frame can be read back even though each copy takes a frame or two to land.
+	struct FReadbackSlot
+	{
+		TUniquePtr<FRHIGPUTextureReadback> Readback;
+		FIntRect Rect;
+		EPixelFormat Format = PF_Unknown;
+		uint64 Frame = 0;
+		bool bPending = false;
+	};
+	FReadbackSlot GSlots[6];
 
 	FColor DecodeTexel(const uint8* Row, int32 X, EPixelFormat Format)
 	{
@@ -85,32 +91,40 @@ namespace
 
 	void PollAndEnqueueReadback(FRDGBuilder& GraphBuilder, FRDGTextureRef Source, const FIntRect& Rect)
 	{
-		if (GReadbackPending && GReadback && GReadback->IsReady())
+		// publish finished copies oldest first
+		for (;;)
 		{
+			FReadbackSlot* Oldest = nullptr;
+			for (FReadbackSlot& S : GSlots) if (S.bPending && (!Oldest || S.Frame < Oldest->Frame)) Oldest = &S;
+			if (!Oldest || !Oldest->Readback->IsReady()) break;
 			int32 PitchPx = 0;
-			const uint8* Data = static_cast<const uint8*>(GReadback->Lock(PitchPx));
+			const uint8* Data = static_cast<const uint8*>(Oldest->Readback->Lock(PitchPx));
 			if (Data)
 			{
-				const int32 Bpp = GPixelFormats[GReadbackFormat].BlockBytes;
-				const FIntPoint Size = GReadbackRect.Size();
+				const int32 Bpp = GPixelFormats[Oldest->Format].BlockBytes;
+				const FIntPoint Size = Oldest->Rect.Size();
 				TArray<FColor> Out; Out.SetNumUninitialized(Size.X * Size.Y);
 				for (int32 Y = 0; Y < Size.Y; ++Y)
 				{
-					const uint8* Row = Data + size_t(GReadbackRect.Min.Y + Y) * PitchPx * Bpp;
-					for (int32 X = 0; X < Size.X; ++X) Out[Y * Size.X + X] = DecodeTexel(Row, GReadbackRect.Min.X + X, GReadbackFormat);
+					const uint8* Row = Data + size_t(Oldest->Rect.Min.Y + Y) * PitchPx * Bpp;
+					for (int32 X = 0; X < Size.X; ++X) Out[Y * Size.X + X] = DecodeTexel(Row, Oldest->Rect.Min.X + X, Oldest->Format);
 				}
-				GReadback->Unlock();
-				PixelArtRenderPrivate::PublishTexels(MoveTemp(Out), Size);
+				Oldest->Readback->Unlock();
+				PixelArtRenderPrivate::PublishTexels(MoveTemp(Out), Size, Oldest->Frame);
 			}
-			GReadbackPending = false;
+			Oldest->bPending = false;
 		}
-		if (!GReadbackPending && PixelArtRenderPrivate::WantsTexelReadback())
+		if (!PixelArtRenderPrivate::WantsTexelReadback()) return;
+		for (FReadbackSlot& S : GSlots)
 		{
-			if (!GReadback) GReadback = MakeUnique<FRHIGPUTextureReadback>(TEXT("PixelArt3D.TexelReadback"));
-			GReadbackRect = Rect;
-			GReadbackFormat = Source->Desc.Format;
-			AddEnqueueCopyPass(GraphBuilder, GReadback.Get(), Source);
-			GReadbackPending = true;
+			if (S.bPending) continue;
+			if (!S.Readback) S.Readback = MakeUnique<FRHIGPUTextureReadback>(TEXT("PixelArt3D.TexelReadback"));
+			S.Rect = Rect;
+			S.Format = Source->Desc.Format;
+			S.Frame = GFrameCounterRenderThread;
+			AddEnqueueCopyPass(GraphBuilder, S.Readback.Get(), Source);
+			S.bPending = true;
+			break;
 		}
 	}
 }

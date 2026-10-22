@@ -35,6 +35,9 @@ private:
 	FVector2d DiagonalAnchor = FVector2d::ZeroVector;
 	FIntPoint DiagonalDir = FIntPoint::ZeroValue;
 	bool bDiagonalAnchored = false;
+	double DiagonalK = 0.0;
+	FVector2d ShownTexel = FVector2d::ZeroVector;
+	bool bHasShown = false;
 
 public:
 

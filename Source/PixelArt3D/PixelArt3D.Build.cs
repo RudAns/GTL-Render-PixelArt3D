@@ -8,7 +8,7 @@ public class PixelArt3D : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
-			"Core", "CoreUObject", "Engine", "InputCore", "UMG", "Slate", "SlateCore", "PixelArtRender"
+			"Core", "CoreUObject", "Engine", "InputCore", "UMG", "Slate", "SlateCore", "ImageCore", "PixelArtRender"
 		});
 	}
 }

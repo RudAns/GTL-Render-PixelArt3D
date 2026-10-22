@@ -212,7 +212,7 @@ void APixelPlayerController::HandleKeys()
 		if (IsInputKeyDown(EKeys::S) || IsInputKeyDown(EKeys::Down)) Screen.Y -= 1;
 		if (IsInputKeyDown(EKeys::D) || IsInputKeyDown(EKeys::Right)) Screen.X += 1;
 		if (IsInputKeyDown(EKeys::A) || IsInputKeyDown(EKeys::Left)) Screen.X -= 1;
-		if (WalkTestTime >= 0.f) { Screen.Y += 1; if (bMotionTest) Screen.X += 1; } // -PixelWalkTest / -PixelMotionTest
+		if (WalkTestTime >= 0.f) { Screen.Y += 1; if (bMotionTest && !FParse::Param(FCommandLine::Get(), TEXT("PixelMotionStraight"))) Screen.X += 1; } // -PixelWalkTest / -PixelMotionTest[ -PixelMotionStraight]
 		if (!Screen.IsNearlyZero())
 		{
 			Screen.Normalize();
@@ -220,7 +220,10 @@ void APixelPlayerController::HandleKeys()
 			static const bool bOld = FParse::Param(FCommandLine::Get(), TEXT("PixelOldMove")); // A/B: equal world speed
 			const FVector World = bOld ? (Right * Screen.X + Fwd * Screen.Y).GetSafeNormal() * 1.04f : Right * Screen.X + Fwd * (Screen.Y / SinPitch); // cm per screen cm
 			const float Texel = 100.f / FMath::Max(1.f, Sub->Settings.PixelsPerMeter);
-			if (ACharacter* Ch = Cast<ACharacter>(P)) Ch->GetCharacterMovement()->MaxWalkSpeed = ScreenSpeedTexels * Texel * World.Size();
+			// 30 texels/s straight and 20 per axis on diagonals: one step every 2nd / 3rd frame at 60 Hz
+			const bool bDiag = FMath::Abs(Screen.X) > 0.1f && FMath::Abs(Screen.Y) > 0.1f;
+			const float Speed = bDiag ? ScreenSpeedTexels * (2.f / 3.f) * UE_SQRT_2 : ScreenSpeedTexels;
+			if (ACharacter* Ch = Cast<ACharacter>(P)) Ch->GetCharacterMovement()->MaxWalkSpeed = Speed * Texel * World.Size();
 			P->AddMovementInput(World.GetSafeNormal(), 1.f);
 		}
 	}

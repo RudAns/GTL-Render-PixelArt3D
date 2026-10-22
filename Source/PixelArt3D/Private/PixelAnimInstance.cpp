@@ -114,6 +114,7 @@ bool FPixelAnimProxy::Evaluate(FPoseContext& Output)
 		if (Head.IsValid()) Output.Pose[Head].SetScale3D(FVector(1.7));
 	}
 
+	if (!bBoneSnap) ShownOffset.Reset();
 	if (bBoneSnap && Texel > 0.0)
 	{
 		TSet<int32> Snap, NoInherit;
@@ -123,11 +124,20 @@ bool FPixelAnimProxy::Evaluate(FPoseContext& Output)
 		const int32 Num = Output.Pose.GetNumBones();
 		TArray<FTransform> CS, CS0;
 		CS.SetNum(Num); CS0.SetNum(Num);
-		auto SnapW = [this](const FVector& W)
+		// Each joint sits on a whole-texel offset from the (snapped) root, with hysteresis: it only moves
+		// to a new texel once it is 0.75 texel away from the one it shows. Plain rounding turns the walk's
+		// 0.4-texel hip bob into a full-texel hop whenever the bob crosses a rounding boundary.
+		const FVector RootW = ComponentToWorld.GetLocation();
+		const FVector2d RootT(FMath::RoundToDouble(FVector::DotProduct(RootW, CamRight) / Texel), FMath::RoundToDouble(FVector::DotProduct(RootW, CamUp) / Texel));
+		auto SnapW = [this, &RootT](const FVector& W, int32 Bone)
 		{
 			const double X = FVector::DotProduct(W, CamRight) / Texel;
 			const double Y = FVector::DotProduct(W, CamUp) / Texel;
-			return W + CamRight * ((FMath::RoundToDouble(X) - X) * Texel) + CamUp * ((FMath::RoundToDouble(Y) - Y) * Texel);
+			const FVector2d Rel(X - RootT.X, Y - RootT.Y);
+			FVector2d& Shown = ShownOffset.FindOrAdd(Bone, FVector2d(FMath::RoundToDouble(Rel.X), FMath::RoundToDouble(Rel.Y)));
+			if (FMath::Abs(Rel.X - Shown.X) >= 0.75) Shown.X = FMath::RoundToDouble(Rel.X);
+			if (FMath::Abs(Rel.Y - Shown.Y) >= 0.75) Shown.Y = FMath::RoundToDouble(Rel.Y);
+			return W + CamRight * ((RootT.X + Shown.X - X) * Texel) + CamUp * ((RootT.Y + Shown.Y - Y) * Texel);
 		};
 		for (const FCompactPoseBoneIndex B : Output.Pose.ForEachBoneIndex())
 		{
@@ -138,7 +148,7 @@ bool FPixelAnimProxy::Evaluate(FPoseContext& Output)
 			if (!Snap.Contains(B.GetInt())) continue;
 
 			const FVector From = NoInherit.Contains(B.GetInt()) ? CS0[B.GetInt()].GetLocation() : CS[B.GetInt()].GetLocation();
-			const FVector Cs = ComponentToWorld.InverseTransformPosition(SnapW(ComponentToWorld.TransformPosition(From)));
+			const FVector Cs = ComponentToWorld.InverseTransformPosition(SnapW(ComponentToWorld.TransformPosition(From), B.GetInt()));
 			CS[B.GetInt()].SetLocation(Cs);
 			Output.Pose[B].SetTranslation(P.IsValid() ? CS[P.GetInt()].InverseTransformPosition(Cs) : Cs);
 		}

@@ -51,8 +51,9 @@ namespace PixelArtRender
 
 	/**
 	 * GPU readback of the displayed low-res texels (before upscaling), for the frame-to-frame flicker meter.
-	 * Enable it, then poll: returns true once per new frame with Inner.X * Inner.Y colors.
+	 * Enable it, then poll: frames come out oldest first (several readbacks are in flight, so consecutive
+	 * rendered frames arrive without gaps), each with Inner.X * Inner.Y colors and its render frame number.
 	 */
 	PIXELARTRENDER_API void SetTexelReadback(bool bEnable);
-	PIXELARTRENDER_API bool FetchTexels(TArray<FColor>& Out, FIntPoint& OutSize);
+	PIXELARTRENDER_API bool FetchTexels(TArray<FColor>& Out, FIntPoint& OutSize, uint64* OutFrame = nullptr);
 }

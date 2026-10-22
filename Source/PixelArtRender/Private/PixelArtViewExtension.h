@@ -8,7 +8,7 @@ namespace PixelArtRenderPrivate
 {
 	void StoreAppliedLayout(const FPixelArtLayout& Layout);
 	bool WantsTexelReadback();
-	void PublishTexels(TArray<FColor>&& Texels, FIntPoint Size);
+	void PublishTexels(TArray<FColor>&& Texels, FIntPoint Size, uint64 Frame);
 }
 
 /**

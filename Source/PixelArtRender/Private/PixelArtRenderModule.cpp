@@ -78,29 +78,32 @@ FPixelArtLayout PixelArtRender::GetAppliedLayout()
 
 namespace
 {
+	struct FTexelFrame { TArray<FColor> Texels; FIntPoint Size; uint64 Frame = 0; };
 	FCriticalSection GTexelLock;
-	TArray<FColor> GTexels;
-	FIntPoint GTexelSize = FIntPoint::ZeroValue;
-	bool GTexelsFresh = false;
+	TArray<FTexelFrame> GTexelQueue; // oldest first
 	std::atomic<bool> GTexelReadback{ false };
 }
 
 void PixelArtRender::SetTexelReadback(bool bEnable) { GTexelReadback = bEnable; }
 
-bool PixelArtRender::FetchTexels(TArray<FColor>& Out, FIntPoint& OutSize)
+bool PixelArtRender::FetchTexels(TArray<FColor>& Out, FIntPoint& OutSize, uint64* OutFrame)
 {
 	FScopeLock Lock(&GTexelLock);
-	if (!GTexelsFresh) return false;
-	Out = GTexels; OutSize = GTexelSize; GTexelsFresh = false;
+	if (GTexelQueue.Num() == 0) return false;
+	FTexelFrame F = MoveTemp(GTexelQueue[0]);
+	GTexelQueue.RemoveAt(0);
+	Out = MoveTemp(F.Texels); OutSize = F.Size;
+	if (OutFrame) *OutFrame = F.Frame;
 	return true;
 }
 
 bool PixelArtRenderPrivate::WantsTexelReadback() { return GTexelReadback; }
 
-void PixelArtRenderPrivate::PublishTexels(TArray<FColor>&& Texels, FIntPoint Size)
+void PixelArtRenderPrivate::PublishTexels(TArray<FColor>&& Texels, FIntPoint Size, uint64 Frame)
 {
 	FScopeLock Lock(&GTexelLock);
-	GTexels = MoveTemp(Texels); GTexelSize = Size; GTexelsFresh = true;
+	if (GTexelQueue.Num() >= 64) GTexelQueue.RemoveAt(0); // nobody is draining: keep the newest
+	GTexelQueue.Add({ MoveTemp(Texels), Size, Frame });
 }
 
 void PixelArtRenderPrivate::StoreAppliedLayout(const FPixelArtLayout& Layout)
