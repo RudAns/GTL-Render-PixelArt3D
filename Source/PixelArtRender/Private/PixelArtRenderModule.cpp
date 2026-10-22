@@ -82,9 +82,10 @@ namespace
 	FCriticalSection GTexelLock;
 	TArray<FTexelFrame> GTexelQueue; // oldest first
 	std::atomic<bool> GTexelReadback{ false };
+	std::atomic<bool> GFinalReadback{ false };
 }
 
-void PixelArtRender::SetTexelReadback(bool bEnable) { GTexelReadback = bEnable; }
+void PixelArtRender::SetTexelReadback(bool bEnable, bool bFinalImage) { GTexelReadback = bEnable; GFinalReadback = bFinalImage; }
 
 bool PixelArtRender::FetchTexels(TArray<FColor>& Out, FIntPoint& OutSize, uint64* OutFrame)
 {
@@ -98,6 +99,7 @@ bool PixelArtRender::FetchTexels(TArray<FColor>& Out, FIntPoint& OutSize, uint64
 }
 
 bool PixelArtRenderPrivate::WantsTexelReadback() { return GTexelReadback; }
+bool PixelArtRenderPrivate::WantsFinalReadback() { return GTexelReadback && GFinalReadback; }
 
 void PixelArtRenderPrivate::PublishTexels(TArray<FColor>&& Texels, FIntPoint Size, uint64 Frame)
 {

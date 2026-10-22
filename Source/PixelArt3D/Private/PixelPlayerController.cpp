@@ -433,7 +433,7 @@ void APixelPlayerController::TickWalkTest(float DeltaTime)
 		{
 			// -PixelFollow=N picks the follow mode under test
 			int32 Mode = 0;
-			if (FParse::Value(FCommandLine::Get(), TEXT("PixelFollow="), Mode)) Sub->Settings.FollowMode = EPixelFollow(FMath::Clamp(Mode, 0, 2));
+			if (FParse::Value(FCommandLine::Get(), TEXT("PixelFollow="), Mode)) Sub->Settings.FollowMode = EPixelFollow(FMath::Clamp(Mode, 0, 3));
 		}
 	}
 	WalkTestTime += DeltaTime;

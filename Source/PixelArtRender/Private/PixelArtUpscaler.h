@@ -10,6 +10,7 @@ struct FPixelUpscalerParams
 	FVector2f SubTexel = FVector2f::ZeroVector;      // snap remainder in texels (x right, y up)
 	bool bBilinear = false;
 	bool bShowGrid = false;
+	int32 SteadyLayerId = 0;
 };
 
 /**

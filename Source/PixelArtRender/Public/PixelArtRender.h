@@ -37,6 +37,7 @@ struct FPixelArtFrame
 	FVector2f SubTexel = FVector2f::ZeroVector; // camera snap remainder, in texels (x right, y up)
 	EPixelArtUpscale Filter = EPixelArtUpscale::Nearest;
 	bool bShowGrid = false;        // draw the texel grid on top of the upscaled image
+	int32 SteadyLayerId = 0;       // custom-stencil id shown WITHOUT the SubTexel shift (the followed character); 0 = none
 };
 
 namespace PixelArtRender
@@ -54,6 +55,6 @@ namespace PixelArtRender
 	 * Enable it, then poll: frames come out oldest first (several readbacks are in flight, so consecutive
 	 * rendered frames arrive without gaps), each with Inner.X * Inner.Y colors and its render frame number.
 	 */
-	PIXELARTRENDER_API void SetTexelReadback(bool bEnable);
+	PIXELARTRENDER_API void SetTexelReadback(bool bEnable, bool bFinalImage = false); // final: the upscaled output instead
 	PIXELARTRENDER_API bool FetchTexels(TArray<FColor>& Out, FIntPoint& OutSize, uint64* OutFrame = nullptr);
 }

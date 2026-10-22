@@ -81,6 +81,22 @@ void APixelCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime)
 	const FVector Wanted = FocusOverride.IsSet() ? FocusOverride.GetValue() : FVector::ZeroVector;
 	switch (S.FollowMode)
 	{
+	case EPixelFollow::Layered:
+	{
+		// Continuous follow, but the framing offset (head height, station framing) is kept a whole number
+		// of texels on screen: then the snapped camera and the snapped character round the same continuous
+		// value and differ by a constant, so the character (shown unshifted) never moves on screen.
+		const FVector Root = PawnPoint - FVector(0, 0, 40) - FVector(0, 0, 80); // mesh root, continuous
+		const FVector Frame = FVector(0, 0, 120);
+		const FVector WantOffset = FocusOverride.IsSet() ? Wanted - (Root + Frame) : FVector::ZeroVector;
+		FollowOffset = FMath::VInterpTo(FollowOffset, WantOffset, DeltaTime, 4.0f);
+		if (!FocusOverride.IsSet() && FollowOffset.SizeSquared() < 0.25) FollowOffset = FVector::ZeroVector;
+		const FVector O = Frame + FollowOffset;
+		const double OX = FVector::DotProduct(O, R) / Texel, OY = FVector::DotProduct(O, U) / Texel;
+		Focus = Root + O + R * ((FMath::RoundToDouble(OX) + Parity.X - OX) * Texel) + U * ((FMath::RoundToDouble(OY) + Parity.Y - OY) * Texel);
+		bHasFocus = true;
+		break;
+	}
 	case EPixelFollow::Locked:
 	{
 		// Ride the player's snapped position, already on the camera grid: the player never moves on screen
@@ -124,13 +140,16 @@ void APixelCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime)
 	}
 
 	FPixelArtFrame Frame = PixelArtRender::GetFrame();
-	const bool bShift = (S.bSubTexel || S.FollowMode == EPixelFollow::SmoothSub) && S.bCameraSnap;
+	const bool bLayered = S.FollowMode == EPixelFollow::Layered && S.bLowRes && S.bCameraSnap && S.bObjectSnap;
+	const bool bShift = (S.bSubTexel || S.FollowMode == EPixelFollow::SmoothSub || bLayered) && S.bCameraSnap;
 	Frame.SubTexel = bShift ? FVector2f(Remainder) : FVector2f::ZeroVector;
+	Frame.SteadyLayerId = bLayered ? Sub->GetSpriteId(Pawn) : 0;
 	{
 		// What the eye sees, in texels: the player's position on screen and the world's scroll offset.
 		const FVector2D Shift = bShift ? Remainder : FVector2D::ZeroVector;
+		const FVector2D CharShift = bLayered ? FVector2D::ZeroVector : Shift;
 		const FVector D = SnappedPoint - Pos;
-		Sub->MotionSamples.Add(FVector4d(FVector::DotProduct(D, R) / Texel - Shift.X, FVector::DotProduct(D, U) / Texel - Shift.Y,
+		Sub->MotionSamples.Add(FVector4d(FVector::DotProduct(D, R) / Texel - CharShift.X, FVector::DotProduct(D, U) / Texel - CharShift.Y,
 			FVector::DotProduct(Pos, R) / Texel + Shift.X, FVector::DotProduct(Pos, U) / Texel + Shift.Y));
 		if (!Sub->bMotionProbe && Sub->MotionSamples.Num() > 48) Sub->MotionSamples.RemoveAt(0, Sub->MotionSamples.Num() - 48);
 	}

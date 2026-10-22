@@ -10,6 +10,8 @@
 #include "PixelArtViewExtension.h"
 #include "RenderGraphUtils.h"
 #include "RHIGPUReadback.h"
+#include "SceneTextures.h"
+#include "SystemTextures.h"
 
 class FPixelUpscalePS : public FGlobalShader
 {
@@ -31,6 +33,8 @@ public:
 		SHADER_PARAMETER(float, Scale)
 		SHADER_PARAMETER(float, UseBilinear)
 		SHADER_PARAMETER(float, ShowGrid)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D<uint2>, StencilTexture)
+		SHADER_PARAMETER(uint32, SteadyLayerId)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -177,14 +181,28 @@ FScreenPassTexture FPixelUpscaler::AddPasses(FRDGBuilder& GraphBuilder, const FV
 	P->Scale = float(Scale);
 	P->UseBilinear = Params.bBilinear ? 1.0f : 0.0f;
 	P->ShowGrid = Params.bShowGrid ? 1.0f : 0.0f;
+	// Steady layer: texels whose custom stencil is the followed character are shown unshifted, everything
+	// else with the camera's sub-texel shift. The background scrolls smoothly while the character, already
+	// on a whole-texel offset from the snapped camera, stays exactly where its continuous position is.
+	FRDGTextureSRVRef Stencil = nullptr;
+	if (Params.SteadyLayerId > 0 && !Params.bBilinear)
+	{
+		const FSceneTextures& SceneTextures = View.GetSceneTextures();
+		if (SceneTextures.CustomDepth.IsValid() && SceneTextures.CustomDepth.Stencil) Stencil = SceneTextures.CustomDepth.Stencil;
+	}
+	P->SteadyLayerId = Stencil ? uint32(Params.SteadyLayerId) : 0u;
+	P->StencilTexture = Stencil ? Stencil : GraphBuilder.CreateSRV(FRDGTextureSRVDesc(GSystemTextures.GetZeroUIntDummy(GraphBuilder)));
 	P->RenderTargets[0] = Output.GetRenderTargetBinding();
 
-	PollAndEnqueueReadback(GraphBuilder, PassInputs.SceneColor.Texture, FIntRect(RenderRect.Min + InnerOffset, RenderRect.Min + InnerOffset + Inner));
+	const bool bFinal = PixelArtRenderPrivate::WantsFinalReadback();
+	if (!bFinal) PollAndEnqueueReadback(GraphBuilder, PassInputs.SceneColor.Texture, FIntRect(RenderRect.Min + InnerOffset, RenderRect.Min + InnerOffset + Inner));
 
 	TShaderMapRef<FPixelUpscalePS> PixelShader(View.ShaderMap);
 	FPixelShaderUtils::AddFullscreenPass(GraphBuilder, View.ShaderMap,
 		RDG_EVENT_NAME("PixelArt3D.Upscale %dx%d x%d", Inner.X, Inner.Y, Scale),
 		PixelShader, P, Output.ViewRect);
+	// frame dumps of what is actually displayed (after the layer composite), for motion inspection
+	if (bFinal) PollAndEnqueueReadback(GraphBuilder, Output.Texture, Output.ViewRect);
 
 	return MoveTemp(Output);
 }

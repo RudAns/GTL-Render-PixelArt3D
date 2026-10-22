@@ -82,5 +82,6 @@ void FPixelArtViewExtension::BeginRenderViewFamily(FSceneViewFamily& InViewFamil
 	Params.SubTexel = FrameState.SubTexel;
 	Params.bBilinear = FrameState.Filter == EPixelArtUpscale::Bilinear;
 	Params.bShowGrid = FrameState.bShowGrid;
+	Params.SteadyLayerId = FrameState.SteadyLayerId;
 	InViewFamily.SetPrimarySpatialUpscalerInterface(new FPixelUpscaler(Params));
 }

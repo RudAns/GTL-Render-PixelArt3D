@@ -242,7 +242,7 @@ void AIslandBuilder::BuildStations()
 	{
 		FPixelStation S; S.Index = 2; S.Pad = FVector(-750, 0, 0); S.Focus = FVector(-950, 0, 0);
 		S.Title = TEXT("② 平移跑道：像素吸附");
-		S.Body = TEXT("站在踏板上，镜头会慢速平移。盯住铁栅栏的细栏杆和尖刺，看右上角的闪烁率。\n[2] 关闭相机吸附：边缘像素交替明灭（像素爬行），闪烁率升高　[3] 亚像素补偿：保留吸附，同时让平移恢复平滑　[4] 物体与骨骼吸附\n[J] 相机跟随：锁定像素（人物静止、世界整格移动）/ 平滑 + 亚像素（世界平滑、人物晃半格）/ 插值滞后（两者错拍，最晕）");
+		S.Body = TEXT("站在踏板上，镜头会慢速平移。盯住铁栅栏的细栏杆和尖刺，看右上角的闪烁率。\n[2] 关闭相机吸附：边缘像素交替明灭（像素爬行），闪烁率升高　[3] 亚像素补偿：保留吸附，同时让平移恢复平滑　[4] 物体与骨骼吸附\n[J] 相机跟随：分层（背景亚像素平滑滚动，人物单独不偏移，两者都稳）/ 锁定像素（人物稳、背景整格跳）/ 平滑 + 亚像素（背景顺、人物晃半格）/ 插值滞后（两者错拍，最晕）");
 		Stations.Add(S);
 		Pad(S.Pad, FLinearColor(0.35f, 0.75f, 0.85f));
 		// wrought-iron fence: thin bars and spikes are the worst case for crawling edges

@@ -83,6 +83,7 @@ public:
 	FPixelCameraState Camera;
 
 	// --- sprites ---------------------------------------------------------------------------
+	int32 GetSpriteId(const AActor* Actor) const { for (const FPixelSprite& S : Sprites) if (S.Actor.Get() == Actor) return S.Id; return 0; }
 	void RegisterSprite(AActor* Actor, bool bDynamic, bool bCharacter, FName Label);
 	void RegisterTerrain(UPrimitiveComponent* Prim);
 	const TArray<FPixelSprite>& GetSprites() const { return Sprites; }

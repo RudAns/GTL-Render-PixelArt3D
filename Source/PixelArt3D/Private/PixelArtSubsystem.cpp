@@ -89,7 +89,7 @@ namespace PixelText
 	}
 	const TCHAR* FollowModeName(EPixelFollow M)
 	{
-		switch (M) { case EPixelFollow::Locked: return TEXT("锁定像素"); case EPixelFollow::SmoothSub: return TEXT("平滑 + 亚像素"); default: return TEXT("插值滞后（旧）"); }
+		switch (M) { case EPixelFollow::Layered: return TEXT("分层：人物稳 + 背景顺"); case EPixelFollow::Locked: return TEXT("锁定像素"); case EPixelFollow::SmoothSub: return TEXT("平滑 + 亚像素"); default: return TEXT("插值滞后（旧）"); }
 	}
 	const TCHAR* DitherModeName(EPixelDitherMode M)
 	{
@@ -544,7 +544,8 @@ void UPixelArtSubsystem::MeasureFlicker()
 	static const bool bDump = FParse::Value(FCommandLine::Get(), TEXT("PixelFrameDump="), DumpDir);
 	if (bDump)
 	{
-		PixelArtRender::SetTexelReadback(bMotionProbe || bMeasureFlicker);
+		static const bool bFinal = FParse::Param(FCommandLine::Get(), TEXT("PixelDumpFinal"));
+		PixelArtRender::SetTexelReadback(bMotionProbe || bMeasureFlicker, bFinal);
 		TArray<FColor> Px; FIntPoint Sz; uint64 Fr = 0;
 		while (PixelArtRender::FetchTexels(Px, Sz, &Fr))
 		{

@@ -18,6 +18,13 @@ float2 SubTexel;
 float Scale;
 float UseBilinear;
 float ShowGrid;
+Texture2D<uint2> StencilTexture;
+uint SteadyLayerId;
+
+uint LayerAt(int2 Texel)
+{
+	return StencilTexture.Load(int3(Texel, 0)) STENCIL_COMPONENT_SWIZZLE;
+}
 
 void MainPS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
 {
@@ -29,9 +36,33 @@ void MainPS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
 		return;
 	}
 
-	const float2 Src = T + InnerOffset + SubTexel;
+	float2 Src = T + InnerOffset + SubTexel;
 	float3 C;
-	if (UseBilinear > 0.5)
+	if (SteadyLayerId != 0)
+	{
+		// the steady layer (followed character) is read without the sub-texel shift
+		const int2 Steady = int2(RectMin + floor(T + InnerOffset));
+		if (LayerAt(Steady) == SteadyLayerId)
+		{
+			OutColor = float4(InputTexture.Load(int3(Steady, 0)).rgb, 1.0);
+			return;
+		}
+		// background: where the shifted lookup lands on the character, the background behind it was never
+		// rendered; borrow the nearest neighbouring background texel (a strip at most one texel wide)
+		int2 Bg = int2(RectMin + floor(Src));
+		if (LayerAt(Bg) == SteadyLayerId)
+		{
+			const float2 F = frac(Src);
+			const int2 Toward = int2(F.x < 0.5 ? -1 : 1, F.y < 0.5 ? -1 : 1);
+			const int2 Tries[4] = { int2(Toward.x, 0), int2(0, Toward.y), int2(-Toward.x, 0), int2(0, -Toward.y) };
+			for (int K = 0; K < 4; ++K)
+			{
+				if (LayerAt(Bg + Tries[K]) != SteadyLayerId) { Bg += Tries[K]; break; }
+			}
+		}
+		C = InputTexture.Load(int3(Bg, 0)).rgb;
+	}
+	else if (UseBilinear > 0.5)
 	{
 		C = InputTexture.SampleLevel(LinearSampler, (RectMin + Src) * InputExtentInv, 0).rgb;
 	}

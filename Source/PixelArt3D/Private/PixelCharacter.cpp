@@ -131,26 +131,37 @@ void APixelCharacter::Tick(float DeltaSeconds)
 		if (FMath::Abs(Pt.Y - ShownTexel.Y) >= 0.9) ShownTexel.Y = FMath::RoundToDouble(Pt.Y);
 		FVector2d Snapped = ShownTexel;
 		static const bool bOld = FParse::Param(FCommandLine::Get(), TEXT("PixelOldMove"));
-		// Diagonal from the held keys, not the velocity: the velocity is still turning while the character
-		// accelerates, and every frame spent rounding x and y separately is a frame of left-then-up.
-		const bool bDiagonal = !bOld && ScreenMoveDir.X != 0 && ScreenMoveDir.Y != 0;
-		if (bDiagonal)
+		if (S.FollowMode == EPixelFollow::Layered)
 		{
-			const FIntPoint Dir = ScreenMoveDir;
-			auto Along = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.X + (Pt.Y - A.Y) * Dir.Y) * 0.5; };
-			auto Across = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.Y - (Pt.Y - A.Y) * Dir.X) * 0.5; };
-			if (!bDiagonalAnchored || Dir != DiagonalDir || FMath::Abs(Across(DiagonalAnchor)) > 0.6)
-			{
-				DiagonalAnchor = Snapped; DiagonalDir = Dir; bDiagonalAnchored = true; DiagonalK = 0.0;
-			}
-			const double Al = Along(DiagonalAnchor);
-			if (FMath::Abs(Al - DiagonalK) >= 0.9) DiagonalK = FMath::RoundToDouble(Al);
-			Snapped = DiagonalAnchor + FVector2d(DiagonalK * Dir.X, DiagonalK * Dir.Y);
-			ShownTexel = Snapped;
+			// layered follow: the camera rounds the same continuous position; no hysteresis, no diagonal
+			// stepping (the character is composited unshifted, so its steps never show on screen)
+			ShownTexel = FVector2d(FMath::RoundToDouble(Pt.X), FMath::RoundToDouble(Pt.Y));
+			Snapped = ShownTexel;
+			bDiagonalAnchored = false;
 		}
 		else
 		{
-			bDiagonalAnchored = false;
+			// Diagonal from the held keys, not the velocity: the velocity is still turning while the character
+			// accelerates, and every frame spent rounding x and y separately is a frame of left-then-up.
+			const bool bDiagonal = !bOld && ScreenMoveDir.X != 0 && ScreenMoveDir.Y != 0;
+			if (bDiagonal)
+			{
+				const FIntPoint Dir = ScreenMoveDir;
+				auto Along = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.X + (Pt.Y - A.Y) * Dir.Y) * 0.5; };
+				auto Across = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.Y - (Pt.Y - A.Y) * Dir.X) * 0.5; };
+				if (!bDiagonalAnchored || Dir != DiagonalDir || FMath::Abs(Across(DiagonalAnchor)) > 0.6)
+				{
+					DiagonalAnchor = Snapped; DiagonalDir = Dir; bDiagonalAnchored = true; DiagonalK = 0.0;
+				}
+				const double Al = Along(DiagonalAnchor);
+				if (FMath::Abs(Al - DiagonalK) >= 0.9) DiagonalK = FMath::RoundToDouble(Al);
+				Snapped = DiagonalAnchor + FVector2d(DiagonalK * Dir.X, DiagonalK * Dir.Y);
+				ShownTexel = Snapped;
+			}
+			else
+			{
+				bDiagonalAnchored = false;
+			}
 		}
 		const FVector Target = World + R * ((Snapped.X - Pt.X) * T) + U * ((Snapped.Y - Pt.Y) * T);
 		Offset = GetActorTransform().InverseTransformVector(Target - World);
