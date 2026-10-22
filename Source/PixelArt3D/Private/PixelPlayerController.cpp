@@ -8,6 +8,7 @@
 
 #include "EngineUtils.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "InputCoreTypes.h"
 #include "Misc/CommandLine.h"
 #if WITH_EDITOR
@@ -197,19 +198,31 @@ void APixelPlayerController::HandleKeys()
 		Beam->SetActorLocation(Island->CycleBeamBase + FVector(41, 16 + Pushes[BeamPush], 40));
 	}
 
-	// Movement relative to the camera yaw.
+	// Movement in screen space: equal texels per second in every screen direction. A ground step toward
+	// the camera's forward shows as only sin(pitch) = 0.66 of a texel, so moving at equal *world* speed
+	// makes a diagonal advance 0.66 texel vertically per horizontal texel; the two axes then step on
+	// different frames in an irregular staircase. Screen-uniform speed gives clean 1:1 pixel diagonals.
 	if (APawn* P = GetPawn())
 	{
 		const float Yaw = Sub->Camera.bValid ? Sub->Camera.Yaw : Sub->Settings.YawDeg + Sub->Settings.YawExtraDeg;
 		const FVector Fwd = FRotator(0, Yaw, 0).Vector();
 		const FVector Right = FRotator(0, Yaw + 90.f, 0).Vector();
-		FVector In = FVector::ZeroVector;
-		if (IsInputKeyDown(EKeys::W) || IsInputKeyDown(EKeys::Up)) In += Fwd;
-		if (IsInputKeyDown(EKeys::S) || IsInputKeyDown(EKeys::Down)) In -= Fwd;
-		if (IsInputKeyDown(EKeys::D) || IsInputKeyDown(EKeys::Right)) In += Right;
-		if (IsInputKeyDown(EKeys::A) || IsInputKeyDown(EKeys::Left)) In -= Right;
-		if (WalkTestTime >= 0.f) { In += Fwd; if (bMotionTest) In += Right; } // -PixelWalkTest / -PixelMotionTest: hold keys headless
-		if (!In.IsNearlyZero()) P->AddMovementInput(In.GetSafeNormal(), 1.f);
+		FVector2D Screen(0, 0); // x right, y up
+		if (IsInputKeyDown(EKeys::W) || IsInputKeyDown(EKeys::Up)) Screen.Y += 1;
+		if (IsInputKeyDown(EKeys::S) || IsInputKeyDown(EKeys::Down)) Screen.Y -= 1;
+		if (IsInputKeyDown(EKeys::D) || IsInputKeyDown(EKeys::Right)) Screen.X += 1;
+		if (IsInputKeyDown(EKeys::A) || IsInputKeyDown(EKeys::Left)) Screen.X -= 1;
+		if (WalkTestTime >= 0.f) { Screen.Y += 1; if (bMotionTest) Screen.X += 1; } // -PixelWalkTest / -PixelMotionTest
+		if (!Screen.IsNearlyZero())
+		{
+			Screen.Normalize();
+			const float SinPitch = FMath::Max(0.2f, FMath::Sin(FMath::DegreesToRadians(Sub->Settings.PitchDeg)));
+			static const bool bOld = FParse::Param(FCommandLine::Get(), TEXT("PixelOldMove")); // A/B: equal world speed
+			const FVector World = bOld ? (Right * Screen.X + Fwd * Screen.Y).GetSafeNormal() * 1.04f : Right * Screen.X + Fwd * (Screen.Y / SinPitch); // cm per screen cm
+			const float Texel = 100.f / FMath::Max(1.f, Sub->Settings.PixelsPerMeter);
+			if (ACharacter* Ch = Cast<ACharacter>(P)) Ch->GetCharacterMovement()->MaxWalkSpeed = ScreenSpeedTexels * Texel * World.Size();
+			P->AddMovementInput(World.GetSafeNormal(), 1.f);
+		}
 	}
 }
 
@@ -426,7 +439,12 @@ void APixelPlayerController::TickWalkTest(float DeltaTime)
 		// Player wobble: distance of each on-screen sample from its 9-frame centred mean (should be ~0).
 		// World judder: per-frame scroll velocity minus its 9-frame mean (0 = perfectly even scroll).
 		const TArray<FVector4d>& M = Sub->MotionSamples;
-		double Wobble = 0, WobbleMax = 0, Judder = 0, Speed = 0; int32 N = 0;
+		double Wobble = 0, WobbleMax = 0, Judder = 0, Speed = 0; int32 N = 0, StepFrames = 0, BothFrames = 0;
+		for (int32 I = 1; I < M.Num(); ++I)
+		{
+			const bool bX = FMath::Abs(M[I].Z - M[I - 1].Z) > 0.5, bY = FMath::Abs(M[I].W - M[I - 1].W) > 0.5;
+			StepFrames += (bX || bY) ? 1 : 0; BothFrames += (bX && bY) ? 1 : 0;
+		}
 		for (int32 I = 5; I + 5 < M.Num(); ++I)
 		{
 			FVector2d Mean(0, 0), VMean(0, 0);
@@ -438,8 +456,8 @@ void APixelPlayerController::TickWalkTest(float DeltaTime)
 		}
 		if (N > 0)
 		{
-			UE_LOG(LogTemp, Display, TEXT("MotionTest[%s]: %d frames, player wobble mean %.3f max %.3f texel, world scroll %.3f texel/frame, judder %.3f texel/frame"),
-				PixelText::FollowModeName(Sub->Settings.FollowMode), N, Wobble / N, WobbleMax, Speed / N, Judder / N);
+			UE_LOG(LogTemp, Display, TEXT("MotionTest[%s]: %d frames, player wobble mean %.3f max %.3f texel, world scroll %.3f texel/frame, judder %.3f texel/frame, diagonal steps on both axes %d / %d"),
+				PixelText::FollowModeName(Sub->Settings.FollowMode), N, Wobble / N, WobbleMax, Speed / N, Judder / N, BothFrames, StepFrames);
 		}
 		Sub->bMotionProbe = false;
 		WalkTestTime = -1.f;

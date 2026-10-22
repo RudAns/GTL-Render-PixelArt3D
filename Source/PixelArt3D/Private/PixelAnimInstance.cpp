@@ -71,19 +71,30 @@ bool FPixelAnimProxy::Evaluate(FPoseContext& Output)
 		return true;
 	}
 
-	auto Quantize = [this](float T) { return bStepped ? FMath::FloorToFloat(T * StepFps) / StepFps : T; };
+	// Stepped keys sample a fixed, even number of poses per loop (8 for the 1.07 s walk), like a sprite
+	// sheet: every cycle shows the same frames. Sampling at a fixed rate instead drifts against a loop
+	// that is not a whole number of frames long, so the hip bob (half a texel) rounds to a 1-texel hop
+	// on different frames each cycle and reads as a random jump.
+	auto Sample = [this](const UAnimSequence* Seq, float T)
+	{
+		const float Len = FMath::Max(Seq->GetPlayLength(), 0.01f);
+		const float Phase = FMath::Fmod(T, Len) / Len;
+		if (!bStepped) return Phase * Len;
+		const int32 N = FMath::Max(2, 2 * FMath::RoundToInt(Len * StepFps * 0.5f));
+		return FMath::FloorToFloat(Phase * N) / N * Len;
+	};
 	// In stepped mode the blend weight is binary too: an in-between weight is just interpolation again.
 	const float Alpha = bStepped ? (WalkAlpha > 0.5f ? 1.f : 0.f) : WalkAlpha;
 
 	{
 		FAnimationPoseData IdleData(Output);
-		Idle->GetAnimationPose(IdleData, FAnimExtractContext(double(Quantize(IdleTime)), false, FDeltaTimeRecord(), true));
+		Idle->GetAnimationPose(IdleData, FAnimExtractContext(double(Sample(Idle, IdleTime)), false, FDeltaTimeRecord(), true));
 	}
 	if (Alpha > 0.f)
 	{
 		FPoseContext WalkPose(Output);
 		FAnimationPoseData WalkData(WalkPose);
-		Walk->GetAnimationPose(WalkData, FAnimExtractContext(double(Quantize(FMath::Fmod(WalkTime, Walk->GetPlayLength()))), false, FDeltaTimeRecord(), true));
+		Walk->GetAnimationPose(WalkData, FAnimExtractContext(double(Sample(Walk, WalkTime)), false, FDeltaTimeRecord(), true));
 		FAnimationPoseData OutData(Output);
 		FAnimationRuntime::BlendTwoPosesTogetherInPlace(OutData, WalkData, 1.f - Alpha);
 	}

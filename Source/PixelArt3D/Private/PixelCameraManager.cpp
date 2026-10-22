@@ -70,9 +70,11 @@ void APixelCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime)
 	}
 	auto SnapToCameraGrid = [&](const FVector& P)
 	{
-		const double X = FVector::DotProduct(P, R) / Texel - Parity.X;
-		const double Y = FVector::DotProduct(P, U) / Texel - Parity.Y;
-		return P + R * ((FMath::RoundToDouble(X) - X) * Texel) + U * ((FMath::RoundToDouble(Y) - Y) * Texel);
+		// round onto the object grid first, then add the parity half texel: rounding (n - 0.5) would be a
+		// tie that float noise flips from frame to frame
+		const double X = FVector::DotProduct(P, R) / Texel;
+		const double Y = FVector::DotProduct(P, U) / Texel;
+		return P + R * ((FMath::RoundToDouble(X) + Parity.X - X) * Texel) + U * ((FMath::RoundToDouble(Y) + Parity.Y - Y) * Texel);
 	};
 
 	// --- follow ----------------------------------------------------------------------------------

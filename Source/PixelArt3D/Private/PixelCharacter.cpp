@@ -1,6 +1,8 @@
 #include "PixelCharacter.h"
 
 #include "PixelAnimInstance.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "PixelArtSubsystem.h"
 
 #include "Components/CapsuleComponent.h"
@@ -100,11 +102,37 @@ void APixelCharacter::Tick(float DeltaSeconds)
 	const FRotator MeshRot(0, MeshBaseYaw + (ShownYaw - ActorYaw), 0);
 
 	// Position: snap the mesh root's world position onto the texel grid, keep the actor continuous.
+	// On a screen diagonal, snap along the diagonal itself (both axes step on the same frame) instead of
+	// rounding x and y separately, which steps them on alternating frames and zig-zags.
 	FVector Offset = FVector::ZeroVector;
 	if (S.bObjectSnap && Sub->Camera.bValid)
 	{
 		const FVector World = GetActorTransform().TransformPosition(MeshBaseLocation);
-		Offset = GetActorTransform().InverseTransformVector(Sub->SnapWorld(World) - World);
+		const FVector R = Sub->Camera.Right, U = Sub->Camera.Up;
+		const double T = Sub->Camera.Texel;
+		const FVector2d Pt(FVector::DotProduct(World, R) / T, FVector::DotProduct(World, U) / T);
+		const FVector2d V(FVector::DotProduct(GetVelocity(), R), FVector::DotProduct(GetVelocity(), U));
+		FVector2d Snapped(FMath::RoundToDouble(Pt.X), FMath::RoundToDouble(Pt.Y));
+		static const bool bOld = FParse::Param(FCommandLine::Get(), TEXT("PixelOldMove"));
+		const bool bDiagonal = !bOld && V.Size() > 20.0 && FMath::Abs(FMath::Abs(V.X) - FMath::Abs(V.Y)) < 0.15 * V.Size();
+		if (bDiagonal)
+		{
+			const FIntPoint Dir(V.X > 0 ? 1 : -1, V.Y > 0 ? 1 : -1);
+			auto Along = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.X + (Pt.Y - A.Y) * Dir.Y) * 0.5; };
+			auto Across = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.Y - (Pt.Y - A.Y) * Dir.X) * 0.5; };
+			if (!bDiagonalAnchored || Dir != DiagonalDir || FMath::Abs(Across(DiagonalAnchor)) > 0.6)
+			{
+				DiagonalAnchor = Snapped; DiagonalDir = Dir; bDiagonalAnchored = true;
+			}
+			const double K = FMath::RoundToDouble(Along(DiagonalAnchor));
+			Snapped = DiagonalAnchor + FVector2d(K * Dir.X, K * Dir.Y);
+		}
+		else
+		{
+			bDiagonalAnchored = false;
+		}
+		const FVector Target = World + R * ((Snapped.X - Pt.X) * T) + U * ((Snapped.Y - Pt.Y) * T);
+		Offset = GetActorTransform().InverseTransformVector(Target - World);
 	}
 	GetMesh()->SetRelativeLocationAndRotation(MeshBaseLocation + Offset, MeshRot);
 }

@@ -32,6 +32,13 @@ public:
 	bool bSpin = false;
 
 private:
+	FVector2d DiagonalAnchor = FVector2d::ZeroVector;
+	FIntPoint DiagonalDir = FIntPoint::ZeroValue;
+	bool bDiagonalAnchored = false;
+
+public:
+
+private:
 	FVector MeshBaseLocation = FVector(0, 0, -80);
 	float MeshBaseYaw = -90.f;
 };

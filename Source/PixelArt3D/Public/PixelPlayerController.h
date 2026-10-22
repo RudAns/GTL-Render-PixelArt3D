@@ -46,6 +46,8 @@ public:
 
 	float WalkTestTime = -1.f;
 	bool bMotionTest = false;
+	/** Walking speed on screen, texels per second, the same in every direction. */
+	float ScreenSpeedTexels = 40.f;
 	FVector WalkTestStart = FVector::ZeroVector;
 	void TickWalkTest(float DeltaTime);
 
