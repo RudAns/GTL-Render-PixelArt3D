@@ -81,6 +81,10 @@ namespace PixelText
 	{
 		switch (M) { case EPixelOutlineMode::Off: return TEXT("关"); case EPixelOutlineMode::Front: return TEXT("归前方物体"); case EPixelOutlineMode::Back: return TEXT("归后方物体"); default: return TEXT("两侧都画"); }
 	}
+	const TCHAR* FollowModeName(EPixelFollow M)
+	{
+		switch (M) { case EPixelFollow::Locked: return TEXT("锁定像素"); case EPixelFollow::SmoothSub: return TEXT("平滑 + 亚像素"); default: return TEXT("插值滞后（旧）"); }
+	}
 	const TCHAR* DitherModeName(EPixelDitherMode M)
 	{
 		switch (M) { case EPixelDitherMode::Off: return TEXT("关"); case EPixelDitherMode::Screen: return TEXT("明暗交界抖动 · 屏幕空间"); default: return TEXT("明暗交界抖动 · 物体空间"); }
@@ -127,7 +131,8 @@ void UPixelArtSubsystem::Initialize(FSubsystemCollectionBase& Collection_)
 	ShadowTarget->ClearColor = FLinearColor(1e6f, 0, 0, 0);
 	ShadowTarget->bAutoGenerateMips = false;
 	ShadowTarget->Filter = TF_Nearest;
-	ShadowTarget->InitAutoFormat(1024, 1024);
+	// 2.3 cm shadow texels: finer than the 6.25 cm screen texel, so a moving shadow re-quantises once (on screen), not twice
+	ShadowTarget->InitAutoFormat(2048, 2048);
 	ShadowTarget->UpdateResourceImmediate(true);
 }
 

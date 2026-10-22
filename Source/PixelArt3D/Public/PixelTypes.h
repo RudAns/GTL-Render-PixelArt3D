@@ -37,6 +37,15 @@ enum class EPixelDitherMode : uint8
 	Count
 };
 
+/** How the camera follows the player (the source of most perceived judder in pixel-art 3D). */
+enum class EPixelFollow : uint8
+{
+	Locked,       // camera rides the player's snapped position: player still on screen, world steps with it
+	SmoothSub,    // camera follows the continuous position, sub-texel shift: smooth world, player wobbles 0.5 texel
+	Lagged,       // eased follow without sub-texel: two unsynchronised quantisations beat against each other
+	Count
+};
+
 enum class EPixelViewMode : uint8
 {
 	Final,
@@ -86,6 +95,7 @@ struct FPixelSettings
 	int32 YawStepDeg = 45;   // 45 like most top-down games; 30 and 90 selectable
 	float YawExtraDeg = 0.f; // exhibits may add a fixed offset (the cycle exhibit uses 45)
 	bool bAutoPan = false;
+	EPixelFollow FollowMode = EPixelFollow::Locked;
 
 	// Debug
 	EPixelViewMode ViewMode = EPixelViewMode::Final;
@@ -96,6 +106,7 @@ struct FPixelSettings
 namespace PixelText
 {
 	const TCHAR* SortModeName(EPixelSortMode M);
+	const TCHAR* FollowModeName(EPixelFollow M);
 	const TCHAR* CycleModeName(EPixelCycleMode M);
 	const TCHAR* OutlineModeName(EPixelOutlineMode M);
 	const TCHAR* DitherModeName(EPixelDitherMode M);

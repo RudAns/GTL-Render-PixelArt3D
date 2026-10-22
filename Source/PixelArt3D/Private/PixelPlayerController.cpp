@@ -57,6 +57,7 @@ void APixelPlayerController::BuildToggles()
 	Add(TEXT("G"), TEXT("显示像素格"), [](const FPixelSettings& S) { return OnOff(S.bShowGrid); }, [](FPixelSettings& S) { S.bShowGrid = !S.bShowGrid; });
 	Add(TEXT("F1"), TEXT("调试视图"), [](const FPixelSettings& S) { return FString(PixelText::ViewModeName(S.ViewMode)); }, [](FPixelSettings& S) { S.ViewMode = Next(S.ViewMode); });
 	Add(TEXT("V"), TEXT("前后关系图"), [](const FPixelSettings& S) { return OnOff(S.bShowGraph); }, [](FPixelSettings& S) { S.bShowGraph = !S.bShowGraph; });
+	Add(TEXT("J"), TEXT("相机跟随"), [](const FPixelSettings& S) { return FString(PixelText::FollowModeName(S.FollowMode)); }, [](FPixelSettings& S) { S.FollowMode = Next(S.FollowMode); });
 	Add(TEXT("F2"), TEXT("排序体积线框"), [](const FPixelSettings& S) { return OnOff(S.bShowSortVolumes); }, [](FPixelSettings& S) { S.bShowSortVolumes = !S.bShowSortVolumes; });
 
 	auto Ch = [this](const TCHAR* Name, const TCHAR* Explain, TFunction<void(FPixelSettings&)> Break)
@@ -85,6 +86,7 @@ void APixelPlayerController::BeginPlay()
 
 	FParse::Value(FCommandLine::Get(), TEXT("PixelCapture="), CaptureDir);
 	if (FParse::Param(FCommandLine::Get(), TEXT("PixelWalkTest"))) WalkTestTime = 0.f;
+	if (FParse::Param(FCommandLine::Get(), TEXT("PixelMotionTest"))) { WalkTestTime = 0.f; bMotionTest = true; }
 	if (!CaptureDir.IsEmpty()) CaptureStep = 0;
 
 	FInputModeGameAndUI Mode;
@@ -165,7 +167,7 @@ void APixelPlayerController::HandleKeys()
 	if (!Sub) return;
 
 	static const FKey ToggleKeys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine, EKeys::Zero,
-		EKeys::P, EKeys::T, EKeys::H, EKeys::B, EKeys::G, EKeys::F1, EKeys::V, EKeys::F2 };
+		EKeys::P, EKeys::T, EKeys::H, EKeys::B, EKeys::G, EKeys::F1, EKeys::V, EKeys::J, EKeys::F2 };
 	for (int32 I = 0; I < UE_ARRAY_COUNT(ToggleKeys); ++I)
 	{
 		if (!WasInputKeyJustPressed(ToggleKeys[I])) continue;
@@ -206,7 +208,7 @@ void APixelPlayerController::HandleKeys()
 		if (IsInputKeyDown(EKeys::S) || IsInputKeyDown(EKeys::Down)) In -= Fwd;
 		if (IsInputKeyDown(EKeys::D) || IsInputKeyDown(EKeys::Right)) In += Right;
 		if (IsInputKeyDown(EKeys::A) || IsInputKeyDown(EKeys::Left)) In -= Right;
-		if (WalkTestTime >= 0.f) In += Fwd; // -PixelWalkTest: hold "W" to verify movement headless
+		if (WalkTestTime >= 0.f) { In += Fwd; if (bMotionTest) In += Right; } // -PixelWalkTest / -PixelMotionTest: hold keys headless
 		if (!In.IsNearlyZero()) P->AddMovementInput(In.GetSafeNormal(), 1.f);
 	}
 }
@@ -236,7 +238,9 @@ void APixelPlayerController::UpdateStations(float DeltaTime)
 	if (APixelCharacter* C = Cast<APixelCharacter>(P)) C->bSpin = S && S->Index == 6;
 	if (APixelCameraManager* Cam = Cast<APixelCameraManager>(PlayerCameraManager))
 	{
-		if (S && S->Index != 6) Cam->FocusOverride = (S->Focus + P->GetActorLocation()) * 0.5f; else Cam->FocusOverride.Reset();
+		// a fixed framing per station; a target that slides with the player makes the camera move at a
+		// fraction of the player's speed, and that ratio beats against the texel grid
+		if (S && S->Index != 6) Cam->FocusOverride = S->Focus; else Cam->FocusOverride.Reset();
 	}
 	if (S && S->Index == 6) Sub->LightYawDeg += 20.f * DeltaTime;
 	// The cycle exhibit needs a diagonal view: axis-aligned boxes can only weave when F has both X and Y.
@@ -404,9 +408,45 @@ void APixelPlayerController::TickCapture(float DeltaTime)
 void APixelPlayerController::TickWalkTest(float DeltaTime)
 {
 	if (WalkTestTime < 0.f || !GetPawn()) return;
-	if (WalkTestTime == 0.f) WalkTestStart = GetPawn()->GetActorLocation();
+	UPixelArtSubsystem* Sub = UPixelArtSubsystem::Get(this);
+	if (WalkTestTime == 0.f)
+	{
+		WalkTestStart = GetPawn()->GetActorLocation();
+		if (bMotionTest && Sub)
+		{
+			// -PixelFollow=N picks the follow mode under test
+			int32 Mode = 0;
+			if (FParse::Value(FCommandLine::Get(), TEXT("PixelFollow="), Mode)) Sub->Settings.FollowMode = EPixelFollow(FMath::Clamp(Mode, 0, 2));
+		}
+	}
 	WalkTestTime += DeltaTime;
-	if (WalkTestTime > 2.f)
+	if (Sub) Sub->bMotionProbe = bMotionTest && WalkTestTime > 0.6f && WalkTestTime <= 3.0f; // skip the acceleration
+	if (bMotionTest && WalkTestTime > 3.0f && Sub)
+	{
+		// Player wobble: distance of each on-screen sample from its 9-frame centred mean (should be ~0).
+		// World judder: per-frame scroll velocity minus its 9-frame mean (0 = perfectly even scroll).
+		const TArray<FVector4d>& M = Sub->MotionSamples;
+		double Wobble = 0, WobbleMax = 0, Judder = 0, Speed = 0; int32 N = 0;
+		for (int32 I = 5; I + 5 < M.Num(); ++I)
+		{
+			FVector2d Mean(0, 0), VMean(0, 0);
+			for (int32 K = -4; K <= 4; ++K) { Mean += FVector2d(M[I + K].X, M[I + K].Y); VMean += FVector2d(M[I + K].Z - M[I + K - 1].Z, M[I + K].W - M[I + K - 1].W); }
+			Mean /= 9.0; VMean /= 9.0;
+			const double W = (FVector2d(M[I].X, M[I].Y) - Mean).Size();
+			const FVector2d V(M[I].Z - M[I - 1].Z, M[I].W - M[I - 1].W);
+			Wobble += W; WobbleMax = FMath::Max(WobbleMax, W); Judder += (V - VMean).Size(); Speed += V.Size(); ++N;
+		}
+		if (N > 0)
+		{
+			UE_LOG(LogTemp, Display, TEXT("MotionTest[%s]: %d frames, player wobble mean %.3f max %.3f texel, world scroll %.3f texel/frame, judder %.3f texel/frame"),
+				PixelText::FollowModeName(Sub->Settings.FollowMode), N, Wobble / N, WobbleMax, Speed / N, Judder / N);
+		}
+		Sub->bMotionProbe = false;
+		WalkTestTime = -1.f;
+		if (CaptureDir.IsEmpty()) UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
+		return;
+	}
+	if (!bMotionTest && WalkTestTime > 2.f)
 	{
 		const FVector End = GetPawn()->GetActorLocation();
 		UE_LOG(LogTemp, Display, TEXT("WalkTest: from %s to %s, moved %.1f cm in 2 s"), *WalkTestStart.ToString(), *End.ToString(), FVector::Dist2D(WalkTestStart, End));

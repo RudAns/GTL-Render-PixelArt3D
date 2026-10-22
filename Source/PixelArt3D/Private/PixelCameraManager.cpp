@@ -5,6 +5,8 @@
 
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "GameFramework/Character.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UnrealClient.h"
@@ -24,12 +26,12 @@ void APixelCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime)
 	}
 	const FPixelSettings& S = Sub->Settings;
 
-	// --- framing -----------------------------------------------------------------------------
-	FVector Target = FVector::ZeroVector;
-	if (const APawn* Pawn = Cast<APawn>(OutVT.Target)) Target = Pawn->GetActorLocation() + FVector(0, 0, 40);
-	if (FocusOverride.IsSet()) Target = FocusOverride.GetValue();
-	if (!bHasFocus) { Focus = Target; bHasFocus = true; }
-	Focus = FMath::VInterpTo(Focus, Target, DeltaTime, 4.0f);
+	// --- framing (the follow itself is resolved below, once the texel grid is known) -------------
+	const APawn* Pawn = Cast<APawn>(OutVT.Target);
+	const FVector PawnPoint = Pawn ? Pawn->GetActorLocation() + FVector(0, 0, 40) : FVector::ZeroVector;
+	// The visible character is its snapped mesh, not the actor: frame that, or the two quantisations beat.
+	FVector SnappedPoint = PawnPoint;
+	if (const ACharacter* Char = Cast<ACharacter>(Pawn)) SnappedPoint = Char->GetMesh()->GetComponentLocation() + FVector(0, 0, 120);
 
 	if (S.bAutoPan)
 	{
@@ -60,15 +62,56 @@ void APixelCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime)
 	const double Texel = 100.0 / FMath::Max(1.f, S.PixelsPerMeter);
 	const double WidthTexels = S.bLowRes ? Layout.Render.X : double(ViewportSize.X) / S.PixelScale;
 
-	// --- snapping ----------------------------------------------------------------------------
-	FVector Pos = Focus + PanOffset - F * 6000.0;
-	FVector2D Remainder = FVector2D::ZeroVector;
 	FVector2D Parity = FVector2D::ZeroVector;
 	if (S.bLowRes && Layout.bValid)
 	{
 		// An odd render dimension puts the frustum edge half a texel off the origin-anchored grid.
 		Parity = FVector2D((Layout.Render.X & 1) ? 0.5 : 0.0, (Layout.Render.Y & 1) ? 0.5 : 0.0);
 	}
+	auto SnapToCameraGrid = [&](const FVector& P)
+	{
+		const double X = FVector::DotProduct(P, R) / Texel - Parity.X;
+		const double Y = FVector::DotProduct(P, U) / Texel - Parity.Y;
+		return P + R * ((FMath::RoundToDouble(X) - X) * Texel) + U * ((FMath::RoundToDouble(Y) - Y) * Texel);
+	};
+
+	// --- follow ----------------------------------------------------------------------------------
+	const FVector Wanted = FocusOverride.IsSet() ? FocusOverride.GetValue() : FVector::ZeroVector;
+	switch (S.FollowMode)
+	{
+	case EPixelFollow::Locked:
+	{
+		// Ride the player's snapped position, already on the camera grid: the player never moves on screen
+		// while walking and the world steps exactly when the player does. Only station framing eases.
+		const FVector Anchor = (S.bCameraSnap && S.bObjectSnap) ? SnapToCameraGrid(SnappedPoint) : PawnPoint;
+		const FVector WantOffset = FocusOverride.IsSet() ? Wanted - Anchor : FVector::ZeroVector;
+		FollowOffset = FMath::VInterpTo(FollowOffset, WantOffset, DeltaTime, 4.0f);
+		if (!FocusOverride.IsSet() && FollowOffset.SizeSquared() < 0.25) FollowOffset = FVector::ZeroVector;
+		Focus = Anchor + FollowOffset;
+		bHasFocus = true;
+		break;
+	}
+	case EPixelFollow::SmoothSub:
+	{
+		const FVector WantOffset = FocusOverride.IsSet() ? Wanted - PawnPoint : FVector::ZeroVector;
+		FollowOffset = FMath::VInterpTo(FollowOffset, WantOffset, DeltaTime, 4.0f);
+		Focus = PawnPoint + FollowOffset;
+		bHasFocus = true;
+		break;
+	}
+	default:
+	{
+		const FVector Target = FocusOverride.IsSet() ? Wanted : PawnPoint;
+		if (!bHasFocus) { Focus = Target; bHasFocus = true; }
+		Focus = FMath::VInterpTo(Focus, Target, DeltaTime, 4.0f);
+		FollowOffset = Focus - PawnPoint;
+		break;
+	}
+	}
+
+	// --- snapping ----------------------------------------------------------------------------
+	FVector Pos = Focus + PanOffset - F * 6000.0;
+	FVector2D Remainder = FVector2D::ZeroVector;
 	if (S.bCameraSnap)
 	{
 		const double X = FVector::DotProduct(Pos, R) / Texel - Parity.X;
@@ -79,7 +122,16 @@ void APixelCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime)
 	}
 
 	FPixelArtFrame Frame = PixelArtRender::GetFrame();
-	Frame.SubTexel = (S.bSubTexel && S.bCameraSnap) ? FVector2f(Remainder) : FVector2f::ZeroVector;
+	const bool bShift = (S.bSubTexel || S.FollowMode == EPixelFollow::SmoothSub) && S.bCameraSnap;
+	Frame.SubTexel = bShift ? FVector2f(Remainder) : FVector2f::ZeroVector;
+	{
+		// What the eye sees, in texels: the player's position on screen and the world's scroll offset.
+		const FVector2D Shift = bShift ? Remainder : FVector2D::ZeroVector;
+		const FVector D = SnappedPoint - Pos;
+		Sub->MotionSamples.Add(FVector4d(FVector::DotProduct(D, R) / Texel - Shift.X, FVector::DotProduct(D, U) / Texel - Shift.Y,
+			FVector::DotProduct(Pos, R) / Texel + Shift.X, FVector::DotProduct(Pos, U) / Texel + Shift.Y));
+		if (!Sub->bMotionProbe && Sub->MotionSamples.Num() > 48) Sub->MotionSamples.RemoveAt(0, Sub->MotionSamples.Num() - 48);
+	}
 	PixelArtRender::SetFrame(Frame);
 
 	// --- view ------------------------------------------------------------------------------------

@@ -30,6 +30,9 @@ public:
 	/** Optional override target (stations frame their exhibit). */
 	TOptional<FVector> FocusOverride;
 
+	/** Locked follow: eased offset from the player's snapped anchor (zero while simply following). */
+	FVector FollowOffset = FVector::ZeroVector;
+
 private:
 	UPROPERTY() TObjectPtr<class UMaterialInstanceDynamic> PostMid;
 };

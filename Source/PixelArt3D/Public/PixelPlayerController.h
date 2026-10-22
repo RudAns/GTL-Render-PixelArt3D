@@ -45,6 +45,7 @@ public:
 	static constexpr int32 NumParams = 7;
 
 	float WalkTestTime = -1.f;
+	bool bMotionTest = false;
 	FVector WalkTestStart = FVector::ZeroVector;
 	void TickWalkTest(float DeltaTime);
 

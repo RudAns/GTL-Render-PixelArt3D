@@ -66,6 +66,7 @@ private:
 	UPROPERTY() TObjectPtr<UTextBlock> FlickerValue;
 	UPROPERTY() TObjectPtr<UTextBlock> SortValue;
 	UPROPERTY() TObjectPtr<UTextBlock> SnapValue;
+	UPROPERTY() TObjectPtr<UTextBlock> WobbleValue;
 	UPROPERTY() TObjectPtr<UTextBlock> ViewValue;
 
 	// station dialogue

@@ -299,6 +299,7 @@ TSharedRef<SWidget> UPixelHUDWidget::RebuildWidget()
 			V->AddChildToVerticalBox(ResNote);
 			FlickerValue = Stat(TEXT("帧间闪烁率"), 20);
 			SnapValue = Stat(TEXT("相机吸附余量"), 14);
+			WobbleValue = Stat(TEXT("人物在屏幕上的抖动（走动时）"), 14);
 			SortValue = Stat(TEXT("精灵排序"), 14);
 			ViewValue = MakeText(13, Gold, true);
 			V->AddChildToVerticalBox(ViewValue)->SetPadding(FMargin(0, 8, 0, 0));
@@ -445,6 +446,20 @@ void UPixelHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	{
 		FlickerValue->SetText(FText::FromString(TEXT("按 M 测量")));
 		FlickerValue->SetColorAndOpacity(FSlateColor(Dim));
+	}
+	{
+		// mean distance of the player's on-screen position from its 9-frame centred mean
+		const TArray<FVector4d>& M = Sub->MotionSamples;
+		double Sum = 0; int32 N = 0;
+		for (int32 I = FMath::Max(4, M.Num() - 36); I + 4 < M.Num(); ++I)
+		{
+			FVector2d Mean(0, 0);
+			for (int32 K = -4; K <= 4; ++K) Mean += FVector2d(M[I + K].X, M[I + K].Y);
+			Sum += (FVector2d(M[I].X, M[I].Y) - Mean / 9.0).Size(); ++N;
+		}
+		const double Wob = N ? Sum / N : 0.0;
+		WobbleValue->SetText(FText::FromString(FString::Printf(TEXT("%.2f texel · 跟随：%s"), Wob, PixelText::FollowModeName(S.FollowMode))));
+		WobbleValue->SetColorAndOpacity(FSlateColor(Wob < 0.05 ? FLinearColor(0.45f, 0.95f, 0.5f) : FLinearColor(1.f, 0.55f, 0.3f)));
 	}
 	SnapValue->SetText(FText::FromString(S.bCameraSnap
 		? FString::Printf(TEXT("(%+.2f, %+.2f) texel%s"), Sub->Camera.Remainder.X, Sub->Camera.Remainder.Y, S.bSubTexel ? TEXT(" · 已补偿") : TEXT(""))

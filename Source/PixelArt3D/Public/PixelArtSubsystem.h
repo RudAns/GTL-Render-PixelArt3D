@@ -108,6 +108,9 @@ public:
 	// --- metrics -------------------------------------------------------------------------------
 	float FlickerPercent = -1.f; // frame-to-frame differing texels after best integer alignment
 	bool bMeasureFlicker = false;
+	/** Per-frame motion samples (texels): x,y = player on screen, z,w = world scroll offset. Filled by the camera. */
+	bool bMotionProbe = false;
+	TArray<FVector4d> MotionSamples;
 
 private:
 	void UpdateSort();
