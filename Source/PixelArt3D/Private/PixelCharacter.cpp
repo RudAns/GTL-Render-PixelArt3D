@@ -117,6 +117,7 @@ void APixelCharacter::Tick(float DeltaSeconds)
 	if (S.bObjectSnap && Sub->Camera.bValid)
 	{
 		const FVector World = GetActorTransform().TransformPosition(MeshBaseLocation);
+		SnapSourceWorld = World; bHasSnapSource = true;
 		const FVector R = Sub->Camera.Right, U = Sub->Camera.Up;
 		const double T = Sub->Camera.Texel;
 		const FVector2d Pt(FVector::DotProduct(World, R) / T, FVector::DotProduct(World, U) / T);
@@ -163,7 +164,12 @@ void APixelCharacter::Tick(float DeltaSeconds)
 				bDiagonalAnchored = false;
 			}
 		}
-		const FVector Target = World + R * ((Snapped.X - Pt.X) * T) + U * ((Snapped.Y - Pt.Y) * T);
+		// Slide along the view direction back onto the ground plane: the snapped point is then the one
+		// ground point under that texel, fixed in the world until the next step. Without this the mesh
+		// keeps drifting along the view between steps (invisible on screen) and its shadow drifts with it.
+		const FVector F = Sub->Camera.Forward;
+		FVector Target = World + R * ((Snapped.X - Pt.X) * T) + U * ((Snapped.Y - Pt.Y) * T);
+		if (FMath::Abs(F.Z) > 0.05) Target -= F * ((Target.Z - World.Z) / F.Z);
 		Offset = GetActorTransform().InverseTransformVector(Target - World);
 	}
 	GetMesh()->SetRelativeLocationAndRotation(MeshBaseLocation + Offset, MeshRot);

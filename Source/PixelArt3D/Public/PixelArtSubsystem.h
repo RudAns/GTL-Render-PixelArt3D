@@ -133,6 +133,12 @@ private:
 	UPROPERTY() TObjectPtr<UTexture> Atlas;
 	UPROPERTY() TObjectPtr<UTextureRenderTarget2D> ShadowTarget;
 	UPROPERTY() TObjectPtr<ASceneCapture2D> ShadowCapture;
+	UPROPERTY() TObjectPtr<ASceneCapture2D> PlayerShadowCapture;
+	UPROPERTY() TObjectPtr<ASceneCapture2D> GroundShadowCapture;
+	UPROPERTY() TObjectPtr<UTextureRenderTarget2D> GroundShadowTarget; // world without the character, read by the ground
+	bool bGroundSplit = false;
+	void SetTerrainShadowMap(UPrimitiveComponent* Prim) const;
+	UPROPERTY() TObjectPtr<UTextureRenderTarget2D> PlayerShadowTarget;
 	UPROPERTY() TArray<TObjectPtr<UMaterialInstanceDynamic>> Mids;
 
 	FVector ShadowOrigin = FVector::ZeroVector;
@@ -140,6 +146,7 @@ private:
 	FVector ShadowRight = FVector::RightVector;
 	FVector ShadowUp = FVector::UpVector;
 	float ShadowExtent = 4800.f;
+	float PlayerShadowExtent = 800.f; // character-only map: 0.8 cm texels
 
 	TArray<FColor> PrevFrame;
 	FIntPoint PrevSize = FIntPoint::ZeroValue;

@@ -428,6 +428,11 @@ void APixelPlayerController::TickWalkTest(float DeltaTime)
 	UPixelArtSubsystem* Sub = UPixelArtSubsystem::Get(this);
 	if (WalkTestTime == 0.f)
 	{
+		float SX = 0.f, SY = 0.f; // -PixelStartX= / -PixelStartY=: start somewhere else (e.g. on plain tiles)
+		if (FParse::Value(FCommandLine::Get(), TEXT("PixelStartX="), SX) && FParse::Value(FCommandLine::Get(), TEXT("PixelStartY="), SY))
+		{
+			GetPawn()->SetActorLocation(FVector(SX, SY, 120.f), false, nullptr, ETeleportType::TeleportPhysics);
+		}
 		WalkTestStart = GetPawn()->GetActorLocation();
 		if (bMotionTest && Sub)
 		{

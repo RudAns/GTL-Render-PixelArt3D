@@ -32,6 +32,9 @@ public:
 	bool bSpin = false;
 	/** Screen direction the player is steering (-1/0/1 per axis, y up), set by the controller each frame. */
 	FIntPoint ScreenMoveDir = FIntPoint::ZeroValue;
+	/** Continuous mesh-root position the last snap was computed from (the camera must round the same value). */
+	FVector SnapSourceWorld = FVector::ZeroVector;
+	bool bHasSnapSource = false;
 
 private:
 	FVector2d DiagonalAnchor = FVector2d::ZeroVector;

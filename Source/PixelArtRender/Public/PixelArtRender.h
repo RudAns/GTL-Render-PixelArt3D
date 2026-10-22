@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 
+class FTextureResource;
+
 /**
  * Geometry of one pixel-art frame.
  *
@@ -38,6 +40,18 @@ struct FPixelArtFrame
 	EPixelArtUpscale Filter = EPixelArtUpscale::Nearest;
 	bool bShowGrid = false;        // draw the texel grid on top of the upscaled image
 	int32 SteadyLayerId = 0;       // custom-stencil id shown WITHOUT the SubTexel shift (the followed character); 0 = none
+
+	// The followed character's shadow, composited at upscale time in the character's own (steady) frame.
+	// The scene's shadow map leaves the character out; a second map holds only the character.
+	bool bPlayerShadow = false;
+	FTextureResource* WorldShadow = nullptr;   // R32f light-space depth, everything but the character
+	FTextureResource* PlayerShadow = nullptr;  // R32f light-space depth, the character only
+	FVector3f LightOrigin = FVector3f::ZeroVector, LightRight = FVector3f::ZeroVector, LightUp = FVector3f::ZeroVector, LightDir = FVector3f::ZeroVector;
+	float LightExtent = 1.f;
+	FVector3f PlayerLightOrigin = FVector3f::ZeroVector; // the character map is centred on the character
+	float PlayerLightExtent = 1.f;
+	float ShadowBias = 11.f;
+	FLinearColor ShadowTint = FLinearColor::White; // display-space multiplier lit ground -> shadowed ground
 };
 
 namespace PixelArtRender

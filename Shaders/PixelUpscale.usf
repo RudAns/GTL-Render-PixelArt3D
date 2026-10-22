@@ -21,6 +21,45 @@ float ShowGrid;
 Texture2D<uint2> StencilTexture;
 uint SteadyLayerId;
 
+uint PlayerShadowOn;
+Texture2D SceneDepthTexture;
+Texture2D WorldShadowTexture;
+Texture2D PlayerShadowTexture;
+float4x4 ClipToWorld; // clip -> translated world
+float3 PreViewTranslation;
+float4 ViewRectMinSize;
+float4 LightOrigin; // w = extent
+float4 PlayerLightOrigin; // w = extent; this map travels with the character
+float4 LightRight;
+float4 LightUp;
+float4 LightDir;    // w = bias
+float4 ShadowTint;
+float4 ShadowSize; // xy world map, zw character map
+
+uint LayerAt(int2 Texel);
+
+// 1 where the ground seen at Texel is in the character's shadow and in no other shadow
+float CharacterShadowAt(int2 Texel)
+{
+	if (LayerAt(Texel) != 1u) return 0.0; // ground only: other receivers keep their own shading
+	const float DeviceZ = SceneDepthTexture.Load(int3(Texel, 0)).r;
+	const float2 UV = (float2(Texel) + 0.5 - ViewRectMinSize.xy) / ViewRectMinSize.zw;
+	const float4 H = mul(float4(UV.x * 2.0 - 1.0, 1.0 - UV.y * 2.0, DeviceZ, 1.0), ClipToWorld);
+	const float3 W = H.xyz / H.w - PreViewTranslation;
+	const float3 Wo = W + float3(0, 0, 5); // same normal offset as the surface material
+	// character map: centred on the (snapped) character, so its silhouette rasterises identically every
+	// frame and the shadow keeps the same shape relative to the character as it walks
+	const float3 Dp = Wo - PlayerLightOrigin.xyz;
+	const float2 PUV = float2(dot(Dp, LightRight.xyz) / PlayerLightOrigin.w + 0.5, 0.5 - dot(Dp, LightUp.xyz) / PlayerLightOrigin.w);
+	if (any(PUV <= 0.002) || any(PUV >= 0.998)) return 0.0;
+	const bool bByCharacter = dot(Dp, LightDir.xyz) - LightDir.w > PlayerShadowTexture.Load(int3(int2(PUV * ShadowSize.zw), 0)).r;
+	const float3 Dw = Wo - LightOrigin.xyz;
+	const float2 WUV = float2(dot(Dw, LightRight.xyz) / LightOrigin.w + 0.5, 0.5 - dot(Dw, LightUp.xyz) / LightOrigin.w);
+	const bool bByWorld = all(WUV > 0.002) && all(WUV < 0.998) && dot(Dw, LightDir.xyz) - LightDir.w > WorldShadowTexture.Load(int3(int2(WUV * ShadowSize.xy), 0)).r;
+	if (ShadowTint.a < -1.5) return (bByCharacter ? 1.0 : 0.0) + (bByWorld ? 2.0 : 0.0); // debug: 1 char, 2 world, 3 both
+	return (bByCharacter && !bByWorld) ? 1.0 : 0.0;
+}
+
 uint LayerAt(int2 Texel)
 {
 	return StencilTexture.Load(int3(Texel, 0)) STENCIL_COMPONENT_SWIZZLE;
@@ -61,6 +100,22 @@ void MainPS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
 			}
 		}
 		C = InputTexture.Load(int3(Bg, 0)).rgb;
+		// the character's shadow belongs to the character's frame: test the unshifted texel
+		if (PlayerShadowOn != 0 && ShadowTint.a < -2.5)
+		{
+			// debug -3: stencil (red = terrain id 1), green = world x grid from reconstructed depth
+			const float DeviceZ = SceneDepthTexture.Load(int3(Steady, 0)).r;
+			const float2 UV = (float2(Steady) + 0.5 - ViewRectMinSize.xy) / ViewRectMinSize.zw;
+			const float4 H = mul(float4(UV.x * 2.0 - 1.0, 1.0 - UV.y * 2.0, DeviceZ, 1.0), ClipToWorld);
+			const float3 W = H.xyz / H.w - PreViewTranslation;
+			C = float3(LayerAt(Steady) == 1u ? 1.0 : 0.0, frac(W.x / 100.0), frac(W.z / 100.0));
+		}
+		else if (PlayerShadowOn != 0)
+		{
+			const float M = CharacterShadowAt(Steady);
+			if (ShadowTint.a < -1.5) { if (M > 0.5) C = M < 1.5 ? float3(1, 0, 1) : (M < 2.5 ? float3(0, 1, 1) : float3(1, 1, 0)); } // -2: sources
+			else if (M > 0.5) C = ShadowTint.a < 0.0 ? float3(1, 0, 1) : C * ShadowTint.rgb; // -1: mask
+		}
 	}
 	else if (UseBilinear > 0.5)
 	{
@@ -69,6 +124,7 @@ void MainPS(float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
 	else
 	{
 		C = InputTexture.SampleLevel(PointSampler, (RectMin + floor(Src) + 0.5) * InputExtentInv, 0).rgb;
+		if (PlayerShadowOn != 0 && CharacterShadowAt(int2(RectMin + floor(Src))) > 0.5) C *= ShadowTint.rgb;
 	}
 
 	if (ShowGrid > 0.5 && Scale >= 3.0)

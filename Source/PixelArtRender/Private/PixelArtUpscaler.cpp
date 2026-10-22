@@ -12,6 +12,8 @@
 #include "RHIGPUReadback.h"
 #include "SceneTextures.h"
 #include "SystemTextures.h"
+#include "RenderTargetPool.h"
+#include "TextureResource.h"
 
 class FPixelUpscalePS : public FGlobalShader
 {
@@ -35,6 +37,20 @@ public:
 		SHADER_PARAMETER(float, ShowGrid)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D<uint2>, StencilTexture)
 		SHADER_PARAMETER(uint32, SteadyLayerId)
+		SHADER_PARAMETER(uint32, PlayerShadowOn)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepthTexture)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, WorldShadowTexture)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, PlayerShadowTexture)
+		SHADER_PARAMETER(FMatrix44f, ClipToWorld)
+		SHADER_PARAMETER(FVector3f, PreViewTranslation)
+		SHADER_PARAMETER(FVector4f, ViewRectMinSize)
+		SHADER_PARAMETER(FVector4f, LightOrigin)
+		SHADER_PARAMETER(FVector4f, PlayerLightOrigin)
+		SHADER_PARAMETER(FVector4f, LightRight)
+		SHADER_PARAMETER(FVector4f, LightUp)
+		SHADER_PARAMETER(FVector4f, LightDir)
+		SHADER_PARAMETER(FVector4f, ShadowTint)
+		SHADER_PARAMETER(FVector4f, ShadowSize)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -185,12 +201,40 @@ FScreenPassTexture FPixelUpscaler::AddPasses(FRDGBuilder& GraphBuilder, const FV
 	// else with the camera's sub-texel shift. The background scrolls smoothly while the character, already
 	// on a whole-texel offset from the snapped camera, stays exactly where its continuous position is.
 	FRDGTextureSRVRef Stencil = nullptr;
-	if (Params.SteadyLayerId > 0 && !Params.bBilinear)
+	if ((Params.SteadyLayerId > 0 || Params.bPlayerShadow) && !Params.bBilinear)
 	{
 		const FSceneTextures& SceneTextures = View.GetSceneTextures();
 		if (SceneTextures.CustomDepth.IsValid() && SceneTextures.CustomDepth.Stencil) Stencil = SceneTextures.CustomDepth.Stencil;
 	}
 	P->SteadyLayerId = Stencil ? uint32(Params.SteadyLayerId) : 0u;
+
+	// Character shadow: rebuilt here from depth + two light-space maps, in the texel frame the character
+	// is shown in (unshifted when it is the steady layer), so it stays glued to the character's feet.
+	FRDGTextureRef Black = GSystemTextures.GetBlackDummy(GraphBuilder);
+	P->SceneDepthTexture = Black; P->WorldShadowTexture = Black; P->PlayerShadowTexture = Black;
+	P->PlayerShadowOn = 0;
+	const FSceneTextures* SceneTexturesPtr = &View.GetSceneTextures();
+	if (Params.bPlayerShadow && Stencil && Params.WorldShadow && Params.PlayerShadow
+		&& Params.WorldShadow->TextureRHI && Params.PlayerShadow->TextureRHI && SceneTexturesPtr->Depth.Resolve)
+	{
+		P->PlayerShadowOn = 1;
+		P->SceneDepthTexture = SceneTexturesPtr->Depth.Resolve;
+		P->WorldShadowTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(Params.WorldShadow->TextureRHI, TEXT("PixelArt3D.WorldShadow")));
+		P->PlayerShadowTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(Params.PlayerShadow->TextureRHI, TEXT("PixelArt3D.PlayerShadow")));
+		// translated-world matrix (float-safe), then undo the translation: world = translated - PreViewTranslation
+		P->ClipToWorld = FMatrix44f(View.ViewMatrices.GetInvTranslatedViewProjectionMatrix());
+		P->PreViewTranslation = FVector3f(View.ViewMatrices.GetPreViewTranslation());
+		P->ViewRectMinSize = FVector4f(RenderRect.Min.X, RenderRect.Min.Y, RenderRect.Width(), RenderRect.Height());
+		P->LightOrigin = FVector4f(Params.LightOrigin, Params.LightExtent);
+		P->PlayerLightOrigin = FVector4f(Params.PlayerLightOrigin, Params.PlayerLightExtent);
+		P->LightRight = FVector4f(Params.LightRight, 0.f);
+		P->LightUp = FVector4f(Params.LightUp, 0.f);
+		P->LightDir = FVector4f(Params.LightDir, Params.ShadowBias);
+		P->ShadowTint = FVector4f(Params.ShadowTint.R, Params.ShadowTint.G, Params.ShadowTint.B, Params.ShadowTint.A); // a < 0: debug views
+		const FIntVector Sz = Params.PlayerShadow->TextureRHI->GetSizeXYZ();
+		const FIntVector Sw = Params.WorldShadow->TextureRHI->GetSizeXYZ();
+		P->ShadowSize = FVector4f(Sw.X, Sw.Y, Sz.X, Sz.Y);
+	}
 	P->StencilTexture = Stencil ? Stencil : GraphBuilder.CreateSRV(FRDGTextureSRVDesc(GSystemTextures.GetZeroUIntDummy(GraphBuilder)));
 	P->RenderTargets[0] = Output.GetRenderTargetBinding();
 

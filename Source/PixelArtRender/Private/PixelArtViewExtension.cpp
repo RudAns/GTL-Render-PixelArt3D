@@ -83,5 +83,13 @@ void FPixelArtViewExtension::BeginRenderViewFamily(FSceneViewFamily& InViewFamil
 	Params.bBilinear = FrameState.Filter == EPixelArtUpscale::Bilinear;
 	Params.bShowGrid = FrameState.bShowGrid;
 	Params.SteadyLayerId = FrameState.SteadyLayerId;
+	Params.bPlayerShadow = FrameState.bPlayerShadow && FrameState.WorldShadow && FrameState.PlayerShadow;
+	Params.WorldShadow = FrameState.WorldShadow;
+	Params.PlayerShadow = FrameState.PlayerShadow;
+	Params.LightOrigin = FrameState.LightOrigin; Params.LightRight = FrameState.LightRight;
+	Params.LightUp = FrameState.LightUp; Params.LightDir = FrameState.LightDir;
+	Params.LightExtent = FrameState.LightExtent; Params.ShadowBias = FrameState.ShadowBias;
+	Params.PlayerLightOrigin = FrameState.PlayerLightOrigin; Params.PlayerLightExtent = FrameState.PlayerLightExtent;
+	Params.ShadowTint = FrameState.ShadowTint;
 	InViewFamily.SetPrimarySpatialUpscalerInterface(new FPixelUpscaler(Params));
 }

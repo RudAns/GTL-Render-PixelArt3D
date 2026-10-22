@@ -11,6 +11,15 @@ struct FPixelUpscalerParams
 	bool bBilinear = false;
 	bool bShowGrid = false;
 	int32 SteadyLayerId = 0;
+	bool bPlayerShadow = false;
+	FTextureResource* WorldShadow = nullptr;
+	FTextureResource* PlayerShadow = nullptr;
+	FVector3f LightOrigin, LightRight, LightUp, LightDir;
+	float LightExtent = 1.f;
+	FVector3f PlayerLightOrigin;
+	float PlayerLightExtent = 1.f;
+	float ShadowBias = 11.f;
+	FLinearColor ShadowTint = FLinearColor::White;
 };
 
 /**

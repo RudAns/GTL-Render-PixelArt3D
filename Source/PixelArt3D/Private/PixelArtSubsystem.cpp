@@ -8,6 +8,9 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/SceneCapture2D.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
+#include "PixelArtRender.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -140,6 +143,20 @@ void UPixelArtSubsystem::Initialize(FSubsystemCollectionBase& Collection_)
 	// 2.3 cm shadow texels: finer than the 6.25 cm screen texel, so a moving shadow re-quantises once (on screen), not twice
 	ShadowTarget->InitAutoFormat(2048, 2048);
 	ShadowTarget->UpdateResourceImmediate(true);
+	GroundShadowTarget = NewObject<UTextureRenderTarget2D>(this, TEXT("RT_GroundShadowDepth"));
+	GroundShadowTarget->RenderTargetFormat = RTF_R32f;
+	GroundShadowTarget->ClearColor = FLinearColor(1e6f, 0, 0, 0);
+	GroundShadowTarget->bAutoGenerateMips = false;
+	GroundShadowTarget->Filter = TF_Nearest;
+	GroundShadowTarget->InitAutoFormat(2048, 2048);
+	GroundShadowTarget->UpdateResourceImmediate(true);
+	PlayerShadowTarget = NewObject<UTextureRenderTarget2D>(this, TEXT("RT_PlayerShadowDepth"));
+	PlayerShadowTarget->RenderTargetFormat = RTF_R32f;
+	PlayerShadowTarget->ClearColor = FLinearColor(1e6f, 0, 0, 0);
+	PlayerShadowTarget->bAutoGenerateMips = false;
+	PlayerShadowTarget->Filter = TF_Nearest;
+	PlayerShadowTarget->InitAutoFormat(1024, 1024);
+	PlayerShadowTarget->UpdateResourceImmediate(true);
 }
 
 void UPixelArtSubsystem::Deinitialize()
@@ -178,6 +195,19 @@ void UPixelArtSubsystem::RegisterTerrain(UPrimitiveComponent* Prim)
 	Prim->SetCustomPrimitiveDataFloat(CpdId, 1);
 	Prim->SetCustomPrimitiveDataFloat(CpdEnable, 0);
 	Terrain.Add(Prim);
+	SetTerrainShadowMap(Prim);
+}
+
+void UPixelArtSubsystem::SetTerrainShadowMap(UPrimitiveComponent* Prim) const
+{
+	// The ground reads the map without the character: the character's shadow on the ground is added at
+	// upscale time, in the character's own frame. Walls and props keep the full map (their depth is pushed
+	// by the sprite sort, so the upscaler cannot rebuild their world position).
+	UTexture* Map = bGroundSplit ? static_cast<UTexture*>(GroundShadowTarget) : static_cast<UTexture*>(ShadowTarget);
+	for (int32 I = 0; I < Prim->GetNumMaterials(); ++I)
+	{
+		if (UMaterialInstanceDynamic* Mid = Cast<UMaterialInstanceDynamic>(Prim->GetMaterial(I))) Mid->SetTextureParameterValue(TEXT("ShadowDepth"), Map);
+	}
 }
 
 FVector UPixelArtSubsystem::SnapWorld(const FVector& World) const
@@ -505,6 +535,54 @@ void UPixelArtSubsystem::UpdateShadowCapture()
 		C->ShowFlags.SetAtmosphere(false);
 		C->ShowFlags.SetFog(false);
 	}
+	if (!GroundShadowCapture)
+	{
+		FActorSpawnParameters P; P.ObjectFlags |= RF_Transient;
+		GroundShadowCapture = World->SpawnActor<ASceneCapture2D>(P);
+		USceneCaptureComponent2D* C = GroundShadowCapture->GetCaptureComponent2D();
+		C->ProjectionType = ECameraProjectionMode::Orthographic;
+		C->OrthoWidth = ShadowExtent;
+		C->CaptureSource = SCS_SceneDepth;
+		C->TextureTarget = GroundShadowTarget;
+		C->bCaptureEveryFrame = false;
+		C->bCaptureOnMovement = false;
+		C->bAutoCalculateOrthoPlanes = false;
+		C->bAlwaysPersistRenderingState = true;
+		C->ShowFlags.SetPostProcessing(false);
+		C->ShowFlags.SetAtmosphere(false);
+		C->ShowFlags.SetFog(false);
+	}
+	if (!PlayerShadowCapture)
+	{
+		FActorSpawnParameters P; P.ObjectFlags |= RF_Transient;
+		PlayerShadowCapture = World->SpawnActor<ASceneCapture2D>(P);
+		USceneCaptureComponent2D* C = PlayerShadowCapture->GetCaptureComponent2D();
+		C->ProjectionType = ECameraProjectionMode::Orthographic;
+		C->OrthoWidth = PlayerShadowExtent;
+		C->CaptureSource = SCS_SceneDepth;
+		C->TextureTarget = PlayerShadowTarget;
+		C->bCaptureEveryFrame = false;
+		C->bCaptureOnMovement = false;
+		C->bAutoCalculateOrthoPlanes = false;
+		C->bAlwaysPersistRenderingState = true;
+		C->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+		C->ShowFlags.SetPostProcessing(false);
+		C->ShowFlags.SetAtmosphere(false);
+		C->ShowFlags.SetFog(false);
+	}
+	// The followed character casts its shadow through the upscaler (glued to the character's frame); the
+	// world map leaves it out so the ground is not darkened twice. Without the pixel pipeline it stays in.
+	APawn* Player = World->GetFirstPlayerController() ? World->GetFirstPlayerController()->GetPawn() : nullptr;
+	const bool bSplit = Player && Settings.bLowRes && Settings.bShadows;
+	{
+		USceneCaptureComponent2D* GC = GroundShadowCapture->GetCaptureComponent2D();
+		GC->HiddenActors.Reset();
+		GC->ClearHiddenComponents();
+		if (Player) { GC->HiddenActors.Add(Player); GC->HideActorComponents(Player, true); }
+		USceneCaptureComponent2D* PC = PlayerShadowCapture->GetCaptureComponent2D();
+		PC->ShowOnlyActors.Reset();
+		if (Player) PC->ShowOnlyActors.Add(Player);
+	}
 	const FRotator Rot(LightPitchDeg, LightYawDeg, 0.f);
 	ShadowForward = Rot.Vector();
 	ShadowRight = FRotationMatrix(Rot).GetScaledAxis(EAxis::Y);
@@ -514,6 +592,45 @@ void UPixelArtSubsystem::UpdateShadowCapture()
 	// Capture explicitly, after the light basis for this frame is final: a deferred every-frame capture
 	// can lag one frame behind the material parameters and shift every shadow lookup while the light moves.
 	if (Settings.bShadows) ShadowCapture->GetCaptureComponent2D()->CaptureScene();
+	GroundShadowCapture->SetActorLocationAndRotation(ShadowOrigin, Rot);
+	if (bSplit) GroundShadowCapture->GetCaptureComponent2D()->CaptureScene();
+	if (bSplit != bGroundSplit)
+	{
+		bGroundSplit = bSplit;
+		for (const TWeakObjectPtr<UPrimitiveComponent>& T : Terrain) if (T.IsValid()) SetTerrainShadowMap(T.Get());
+	}
+	// centred on the snapped character, at the same distance along the light as the world map
+	FVector PlayerOrigin = ShadowOrigin;
+	if (const ACharacter* Ch = Cast<ACharacter>(Player))
+	{
+		const FVector Root = Ch->GetMesh()->GetComponentLocation();
+		PlayerOrigin = Root - ShadowForward * FVector::DotProduct(Root - ShadowOrigin, ShadowForward);
+	}
+	PlayerShadowCapture->SetActorLocationAndRotation(PlayerOrigin, Rot);
+	if (bSplit) PlayerShadowCapture->GetCaptureComponent2D()->CaptureScene();
+
+	// Hand the light basis and the ground's shadow tint to the upscaler. Flat ground is lit at the toon
+	// step of dot(up, -light); in shadow it drops to step 0. Same shade ramp as the surface material, then
+	// into display space (the post pass outputs pow(c, 1/2.2)).
+	FPixelArtFrame Frame = PixelArtRender::GetFrame();
+	Frame.bPlayerShadow = bSplit;
+	Frame.WorldShadow = GroundShadowTarget ? GroundShadowTarget->GetResource() : nullptr;
+	Frame.PlayerShadow = PlayerShadowTarget ? PlayerShadowTarget->GetResource() : nullptr;
+	Frame.LightOrigin = FVector3f(ShadowOrigin); Frame.LightRight = FVector3f(ShadowRight);
+	Frame.LightUp = FVector3f(ShadowUp); Frame.LightDir = FVector3f(ShadowForward);
+	Frame.LightExtent = ShadowExtent;
+	Frame.PlayerLightOrigin = FVector3f(PlayerOrigin); Frame.PlayerLightExtent = PlayerShadowExtent;
+	const float NdlRaw = FMath::Max(float(FVector::DotProduct(FVector::UpVector, -ShadowForward)), 0.05f);
+	Frame.ShadowBias = 6.f + 6.f * FMath::Min(FMath::Sqrt(1.f - NdlRaw * NdlRaw) / NdlRaw, 6.f);
+	float Q = FMath::Clamp(NdlRaw * 1.2f, 0.f, 1.f);
+	if (Settings.ToonSteps > 0) Q = FMath::Clamp(FMath::FloorToFloat(Q * Settings.ToonSteps + 0.35f) / Settings.ToonSteps, 0.f, 1.f);
+	const FLinearColor Dark(0.40f, 0.46f, 0.66f), Lit(1.05f, 1.01f, 0.93f);
+	const FLinearColor ShadeLit = Dark + (Lit - Dark) * Q;
+	auto Ratio = [](float A, float B) { return FMath::Pow(FMath::Clamp(A / FMath::Max(B, 1e-3f), 0.f, 1.f), 1.f / 2.2f); };
+	static const bool bMaskDebug = FParse::Param(FCommandLine::Get(), TEXT("PixelShadowMaskDebug")); // paints the mask magenta
+	static const bool bSrcDebug = FParse::Param(FCommandLine::Get(), TEXT("PixelShadowSourceDebug")); // magenta character, cyan world, yellow both
+	Frame.ShadowTint = FLinearColor(Ratio(Dark.R, ShadeLit.R), Ratio(Dark.G, ShadeLit.G), Ratio(Dark.B, ShadeLit.B), FParse::Param(FCommandLine::Get(), TEXT("PixelShadowRecDebug")) ? -3.f : (bSrcDebug ? -2.f : (bMaskDebug ? -1.f : 1.f)));
+	PixelArtRender::SetFrame(Frame);
 }
 
 void UPixelArtSubsystem::UpdateMaterialParameters()

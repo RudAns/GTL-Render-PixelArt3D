@@ -6,6 +6,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "GameFramework/Character.h"
+#include "PixelCharacter.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -86,7 +87,10 @@ void APixelCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime)
 		// Continuous follow, but the framing offset (head height, station framing) is kept a whole number
 		// of texels on screen: then the snapped camera and the snapped character round the same continuous
 		// value and differ by a constant, so the character (shown unshifted) never moves on screen.
-		const FVector Root = PawnPoint - FVector(0, 0, 40) - FVector(0, 0, 80); // mesh root, continuous
+		// mesh root, continuous: exactly the value the character snapped from this frame (collision can still
+		// move the actor after the character ticked, and rounding two different values breaks the lock)
+		FVector Root = PawnPoint - FVector(0, 0, 40) - FVector(0, 0, 80);
+		if (const APixelCharacter* PC = Cast<APixelCharacter>(Pawn)) { if (PC->bHasSnapSource) Root = PC->SnapSourceWorld; }
 		const FVector Frame = FVector(0, 0, 120);
 		const FVector WantOffset = FocusOverride.IsSet() ? Wanted - (Root + Frame) : FVector::ZeroVector;
 		FollowOffset = FMath::VInterpTo(FollowOffset, WantOffset, DeltaTime, 4.0f);
