@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D 像素画渲染：UE5 落地要点</title><style>
+:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#5d6670;--line:#e3e0d8;--accent:#17706b;--warn:#b9551f;--code:#f2efe8;--panel:#ffffff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181c;--fg:#e6e6e3;--muted:#9aa3ad;--line:#2d3138;--accent:#4fb2a8;--warn:#e48a54;--code:#20242a;--panel:#1d2025;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#16181c;--fg:#e6e6e3;--muted:#9aa3ad;--line:#2d3138;--accent:#4fb2a8;--warn:#e48a54;--code:#20242a;--panel:#1d2025;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px;max-width:1240px;margin:0 auto;padding:40px 24px 80px}
+nav{position:sticky;top:24px;align-self:start;font-size:14px}
+nav .t{font-weight:700;margin-bottom:8px;color:var(--muted);letter-spacing:.05em}
+nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+nav li a{display:block;padding:4px 12px;color:var(--muted);text-decoration:none}
+nav li a:hover{color:var(--accent)}
+main{min-width:0}
+main>p,main>ul,main>ol,main>h2,main>h3,header{max-width:46em}
+header h1{font-size:30px;line-height:1.3;margin:0 0 8px;text-wrap:balance}
+header .sub{color:var(--muted);margin:0 0 28px}
+h2{font-size:22px;margin:48px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-size:18px;margin:28px 0 8px}
+p,li{margin:8px 0}
+code{font-family:"Cascadia Code",Consolas,monospace;font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:14px 16px;border-radius:8px;overflow-x:auto;max-width:60em}
+pre code{background:none;padding:0;font-size:13.5px;line-height:1.6}
+table{border-collapse:collapse;margin:12px 0 20px;font-size:14.5px;display:block;overflow-x:auto;max-width:100%}
+th,td{border:1px solid var(--line);padding:6px 12px;text-align:left;vertical-align:top}
+th{background:var(--code)}
+td{font-variant-numeric:tabular-nums}
+.diagram{margin:20px 0 28px;max-width:62em}
+.diagram svg{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:8px;background:#fff}
+.diagram figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.note{border-left:3px solid var(--warn);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;max-width:46em;margin:14px 0}
+a{color:var(--accent)}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px;padding:24px 16px}nav{position:static}}
+</style></head>
+<body><div class="wrap">
+<nav><div class="t">目录</div><ol>
+<li><a href="#s1">1. 管线总览</a></li>
+<li><a href="#s2">2. 低分辨率渲染与整数放大</a></li>
+<li><a href="#s3">3. 像素网格吸附</a></li>
+<li><a href="#s4">4. 相机跟随：分层合成</a></li>
+<li><a href="#s5">5. 角色影子跟随角色层</a></li>
+<li><a href="#s6">6. 精灵排序</a></li>
+<li><a href="#s7">7. 光照、阴影、描边、抖动</a></li>
+<li><a href="#s8">8. 动画</a></li>
+<li><a href="#s9">9. 测量与自测</a></li>
+<li><a href="#s10">10. 坑点清单</a></li>
+<li><a href="#s11">11. 移植清单</a></li>
+</ol></nav>
+<main>
+<header>
+<h1>3D 像素画渲染：UE5 落地要点</h1>
+<p class="sub">对应工程 GTL-Render-PixelArt3D（UE 5.8，C++，不改引擎）。按管线顺序列出每一步的做法、关键参数和踩过的坑，可以直接对照源码搬进自己的项目。原理与业界方案对比见 <a href="Research.html">Research.html</a>。</p>
+</header>
+
+<h2 id="s1">1. 管线总览</h2>
+<p>整套方案的原则是：几何、动画、光照都按 3D 正常计算，只在「位置」和「画面」两处量化到像素网格。下图是一帧的数据流，橙色框是本工程新增的部分，灰色框是引擎原有流程。</p>
+<figure class="diagram"><svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker></defs>
+<text x="16" y="28" font-size="13" fill="#777">游戏线程</text>
+<text x="16" y="198" font-size="13" fill="#777">渲染线程</text>
+<line x1="10" y1="150" x2="970" y2="150" stroke="#ddd" stroke-dasharray="4 4"/>
+<g font-size="13">
+<rect x="20" y="42" width="170" height="80" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="105" y="66" text-anchor="middle" font-weight="700" fill="#222">角色 / 物体吸附</text>
+<text x="105" y="86" text-anchor="middle" fill="#444">网格根整格 + 落回地面</text>
+<text x="105" y="104" text-anchor="middle" fill="#444">骨骼相对根整格（回差）</text>
+<rect x="210" y="42" width="170" height="80" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="295" y="66" text-anchor="middle" font-weight="700" fill="#222">精灵排序</text>
+<text x="295" y="86" text-anchor="middle" fill="#444">前后图 → 强连通分量</text>
+<text x="295" y="104" text-anchor="middle" fill="#444">分层 → CPD 槽位深度</text>
+<rect x="400" y="42" width="170" height="80" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="485" y="66" text-anchor="middle" font-weight="700" fill="#222">阴影图 ×3</text>
+<text x="485" y="86" text-anchor="middle" fill="#444">全场景 / 去角色地面用</text>
+<text x="485" y="104" text-anchor="middle" fill="#444">仅角色（以角色为中心）</text>
+<rect x="590" y="42" width="170" height="80" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="675" y="66" text-anchor="middle" font-weight="700" fill="#222">相机</text>
+<text x="675" y="86" text-anchor="middle" fill="#444">连续跟随 → 吸附整格</text>
+<text x="675" y="104" text-anchor="middle" fill="#444">余量交给放大</text>
+<rect x="20" y="212" width="190" height="70" rx="8" fill="#eceae4" stroke="#999"/>
+<text x="115" y="240" text-anchor="middle" font-weight="700" fill="#222">低分辨率渲染</text>
+<text x="115" y="260" text-anchor="middle" fill="#444">Unlit + WPO 排序推移</text>
+<rect x="240" y="212" width="190" height="70" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="335" y="240" text-anchor="middle" font-weight="700" fill="#222">后处理（替换色调映射）</text>
+<text x="335" y="260" text-anchor="middle" fill="#444">ID 描边 + 3×3 清理</text>
+<rect x="460" y="212" width="260" height="70" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="590" y="236" text-anchor="middle" font-weight="700" fill="#222">自定义放大 ISpatialUpscaler</text>
+<text x="590" y="256" text-anchor="middle" fill="#444">背景：亚像素平移 · 角色层：不平移</text>
+<text x="590" y="274" text-anchor="middle" fill="#444">角色影子在角色层合成</text>
+<rect x="750" y="212" width="200" height="70" rx="8" fill="#eceae4" stroke="#999"/>
+<text x="850" y="244" text-anchor="middle" font-weight="700" fill="#222">屏幕（整数倍）</text>
+<text x="850" y="264" text-anchor="middle" fill="#444">UMG HUD / 标记同步偏移</text>
+</g>
+<g stroke="#555" stroke-width="1.4" fill="none" marker-end="url(#a)">
+<path d="M190,82 H208"/><path d="M380,82 H398"/><path d="M570,82 H588"/>
+<path d="M210,247 H238"/><path d="M430,247 H458"/><path d="M720,247 H748"/>
+<path d="M675,122 V180 H590 V210"/><path d="M485,122 V200 H560 V210"/><path d="M295,122 V170 H115 V210"/>
+</g>
+</svg><figcaption>一帧的数据流。游戏线程决定「东西在哪」，渲染线程决定「画面怎么上屏」；两边都只在网格吸附和最终放大这两步做量化。</figcaption></figure>
+
+<h2 id="s2">2. 低分辨率渲染与整数放大</h2>
+<ul>
+<li><strong>接入点</strong>：一个 <code>FSceneViewExtensionBase</code>（模块加载阶段设为 <code>PostConfigInit</code>，引擎初始化后注册）。<code>SetupViewFamily</code> 只对游戏视口写 <code>r.ScreenPercentage</code>，<code>BeginRenderViewFamily</code> 里调用 <code>SetPrimarySpatialUpscalerInterface</code> 装上自己的 <code>ISpatialUpscaler</code>。该接口在 <code>Renderer/Private</code> 头文件里，Build.cs 需要把 <code>Runtime/Renderer/Private</code> 和 <code>Internal</code> 加进 PrivateIncludePaths。</li>
+<li><strong>尺寸</strong>：显示窗口 <code>Inner = Viewport / Scale</code>（向下取整）。实际渲染尺寸 <code>Render</code> 每边至少多 2 texel 余量，留给亚像素平移；同时 <code>Render.Y</code> 取 <code>Viewport.Y / gcd(Viewport)</code> 的整数倍，保证 texel 是正方形。屏幕百分比写 <code>(Render.Y − 0.001) / Viewport.Y × 100</code>，避免引擎向上取整多出一行。</li>
+<li><strong>必须关掉的东西</strong>：抗锯齿（TSR/TAAU 会接管放大）、动态分辨率、动态模糊、自动曝光、Bloom、Lumen、VSM、遮挡查询、正交近平面修正，见 <code>Config/DefaultEngine.ini</code>。<code>r.CustomDepth=3</code> 打开，描边和角色分层都用到自定义深度模板。</li>
+<li><strong>放大着色器</strong>（<code>Shaders/PixelUpscale.usf</code>）：输出像素 <code>p</code> 取 texel <code>floor(p / Scale + InnerOffset + SubTexel)</code>，<code>SubTexel</code> 是相机吸附余量（y 取反，因为纹理 v 向下），四周黑边居中。</li>
+</ul>
+<table><tr><th>参数</th><th>本工程取值</th><th>说明</th></tr>
+<tr><td>像素尺寸 Scale</td><td>4</td><td>1 texel = 4×4 屏幕像素</td></tr>
+<tr><td>每米 texel</td><td>16（6.25 cm/texel）</td><td>与贴图密度一致，1 texel 贴图正好占 1 屏幕 texel</td></tr>
+<tr><td>俯角</td><td>41.41°</td><td>cos = 0.75，1 米竖直边正好 12 texel</td></tr>
+<tr><td>相机旋转</td><td>每档 45°</td><td>网格与屏幕对齐，任意偏航下吸附都成立</td></tr>
+</table>
+
+<h2 id="s3">3. 像素网格吸附</h2>
+<p>网格以世界原点为锚、与屏幕右 / 上轴对齐，格距 = 1 texel。所有吸附都只改这两个轴上的坐标。</p>
+<ul>
+<li><strong>相机</strong>：位置投影到右 / 上轴取整，余量交给放大着色器。渲染尺寸为奇数时，画面边缘落在半格上，要先加 0.5 的奇偶偏移再取整，并且「先取整再加偏移」，否则 <code>n − 0.5</code> 的取整会被浮点误差来回翻转。</li>
+<li><strong>物体</strong>：只挪可见网格，Actor 保持连续（移动、碰撞都不受影响）。吸附后再<strong>沿视线方向滑回地面平面</strong>：这样两次换格之间网格在世界里完全不动；否则它会沿视线悄悄漂移，屏幕上看不出来，但它的影子会跟着漂。</li>
+<li><strong>斜向移动</strong>：移动速度按屏幕方向等速（往屏幕上方走时世界速度 ÷ sin(俯角)），斜向时沿 45° 线整体吸附，横纵两轴在同一帧换格。是否斜走按玩家按住的方向键判断，不要按速度判断（起步时速度方向还没转过来）。</li>
+<li><strong>骨骼</strong>（<code>FAnimInstanceProxy::Evaluate</code>）：每个关节相对已吸附的根节点保持整格偏移，偏离超过 <strong>0.75 texel</strong> 才换格。直接按绝对网格取整，会把走路时 0.4 格的身体起伏放大成整格跳动。脚不继承父骨骼的修正，保证落地不滑。</li>
+<li><strong>挂件</strong>：武器挂在胸部骨骼上，不要挂在网格根上，否则身体起伏时挂件不动，两者相对跳。</li>
+</ul>
+
+<h2 id="s4">4. 相机跟随：分层合成</h2>
+<p>相机吸附和角色吸附各自对网格取整。只要两者取整的不是同一个值（比如相机缓动跟随、站台取景跟角色中点），两次取整就会错拍，角色在屏幕上来回跳最多 1 格以上，背景滚动也忽快忽慢。这是「画面晃、看着晕」的主要来源。几种跟随方式的对比：</p>
+<table><tr><th>跟随方式</th><th>角色在屏幕上</th><th>背景滚动</th><th>实测（60 fps 斜走）</th></tr>
+<tr><td>缓动插值（常见写法）</td><td>晃，平均 0.40 格，最大 1.18 格</td><td>整格跳、节奏不均</td><td>最晕</td></tr>
+<tr><td>锁定像素：相机直接骑在角色吸附后的位置上</td><td>纹丝不动</td><td>整格跳（每 2–3 帧 4 个屏幕像素）</td><td>传统像素游戏手感</td></tr>
+<tr><td>平滑 + 亚像素：相机连续跟随，余量交给放大</td><td>晃约半格</td><td>每帧平滑</td><td>背景顺、人不稳</td></tr>
+<tr><td><strong>分层（本工程默认）</strong></td><td><strong>纹丝不动</strong></td><td><strong>每帧平滑（直走每帧 2 屏幕像素）</strong></td><td><strong>两者都稳</strong></td></tr>
+</table>
+<figure class="diagram"><svg viewBox="0 0 980 250" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif" font-size="13">
+<defs><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker></defs>
+<rect x="20" y="30" width="250" height="190" rx="8" fill="#fff" stroke="#999"/>
+<text x="145" y="22" text-anchor="middle" fill="#555">低分辨率画面（相机已吸附）</text>
+<g fill="#e8e3d6" stroke="#cfc8b6"><rect x="40" y="50" width="210" height="150"/></g>
+<rect x="130" y="95" width="30" height="60" fill="#b23a33"/><text x="145" y="175" text-anchor="middle" fill="#333">角色（模板 ID = k）</text>
+<text x="145" y="70" text-anchor="middle" fill="#777">背景</text>
+<rect x="360" y="40" width="270" height="70" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="495" y="66" text-anchor="middle" font-weight="700" fill="#222">模板 = k 的 texel</text>
+<text x="495" y="88" text-anchor="middle" fill="#444">按输出像素直接取，不加偏移</text>
+<rect x="360" y="140" width="270" height="80" rx="8" fill="#d7ebe8" stroke="#17706b"/>
+<text x="495" y="166" text-anchor="middle" font-weight="700" fill="#222">其他 texel</text>
+<text x="495" y="186" text-anchor="middle" fill="#444">加相机余量 SubTexel 后取</text>
+<text x="495" y="206" text-anchor="middle" fill="#444">落在角色上 → 借相邻背景</text>
+<rect x="710" y="80" width="250" height="100" rx="8" fill="#fff" stroke="#999"/>
+<text x="835" y="112" text-anchor="middle" font-weight="700" fill="#222">屏幕</text>
+<text x="835" y="134" text-anchor="middle" fill="#444">角色：在真实连续位置</text>
+<text x="835" y="156" text-anchor="middle" fill="#444">背景：亚像素平滑滚动</text>
+<g stroke="#555" stroke-width="1.4" fill="none" marker-end="url(#b)"><path d="M270,90 H358"/><path d="M270,170 H358"/><path d="M630,75 H690 V110 H708"/><path d="M630,180 H690 V150 H708"/></g>
+</svg><figcaption>分层合成。角色和背景来自同一张低分辨率图，只在放大时用不同的采样偏移。</figcaption></figure>
+<ol>
+<li><strong>相机</strong>：跟随角色网格根的<strong>连续</strong>位置，但取景偏移（头部高度、站台取景）在屏幕右 / 上轴上保持整数 texel。这样相机吸附和角色吸附对同一个连续值取整，两者之差是常数，角色按原样显示就正好在它的真实屏幕位置上。角色这一侧用普通四舍五入，不要加回差或斜向锚定，必须和相机的取整一致。</li>
+<li><strong>相机读角色自己算吸附时用的那个连续位置</strong>（<code>SnapSourceWorld</code>），不要读 Actor 位置：碰撞可能在角色 Tick 之后又挪动 Actor，两边就取整了不同的值。</li>
+<li><strong>放大着色器</strong>：从 <code>View.GetSceneTextures().CustomDepth.Stencil</code> 读模板（取值用 <code>STENCIL_COMPONENT_SWIZZLE</code>）。模板等于角色 ID 的 texel 不加偏移直接取；其余加 <code>SubTexel</code> 后取；如果加了偏移后正好落在角色身上（背景被角色挡住的那一条，最宽 1 texel），就取朝偏移方向的相邻背景 texel 补上。</li>
+<li><strong>HUD 和场景标记</strong>：不要用 <code>AHUD::Project</code>，它不知道这个偏移。按「低分辨率坐标 − InnerOffset − SubTexel（y 取反）× Scale + 黑边」自己换算，标记才会跟着地面平滑移动。</li>
+</ol>
+<div class="note">进出站台时取景偏移要缓动到新位置，过渡期间偏移按整格变化，角色和背景会小步跳约半秒。这是让角色在稳定期纹丝不动的代价。</div>
+
+<h2 id="s5">5. 角色影子跟随角色层</h2>
+<p>角色已经单独成层，但它投在地面上的影子画在背景里，影子边缘按背景的网格取样，相对角色仍会来回错动半格。解法是把角色投在地面上的影子也放到角色层，在放大时合成：</p>
+<ul>
+<li><strong>三张阴影深度图</strong>（正交 <code>SceneCapture2D</code>，<code>SCS_SceneDepth</code>，R32f，每帧 <code>CaptureScene()</code> 同步拍）：
+  <ul><li>全场景：墙、道具等接收面使用；</li>
+  <li>去掉角色的全场景：地面材质使用（地面上不再画角色影子，避免重复压暗）；</li>
+  <li>只有角色（<code>PRM_UseShowOnlyList</code>），<strong>以吸附后的角色为中心</strong>、800 cm 宽：角色每次都落在这张图的同一位置，轮廓光栅化完全一样，影子形状相对角色不变。</li></ul></li>
+<li><strong>放大时重建世界坐标</strong>：用<strong>不加偏移</strong>的那个 texel（角色层的坐标）读场景深度，用 <code>GetInvTranslatedViewProjectionMatrix()</code> 还原，再减去 <code>PreViewTranslation</code>。直接用 <code>GetInvViewProjectionMatrix()</code> 在大世界坐标下不可靠，本工程里得到的点全部落在阴影图外。</li>
+<li><strong>判定</strong>：该点在「仅角色」图里被挡、在「去角色」图里没被挡、模板是地面（ID 1）时，按地面的 toon 明暗比例压暗：<code>pow(shade(0) / shade(q地面), 1/2.2)</code>，<code>q</code> 由光照方向和色阶数在游戏线程算好传进来。</li>
+<li>墙和道具的深度被排序推移过，放大时还原不出真实位置，所以它们继续用全场景阴影图，在材质里照常算。</li>
+</ul>
+
+<h2 id="s6">6. 精灵排序</h2>
+<ol>
+<li><strong>两两前后</strong>：两个包围盒找一条分离轴，按视线方向在该轴上的分量判断谁在前；有多条分离轴时取「间隔 × |视线分量|」最大的那条；找不到时退回比较中心深度。屏幕矩形的重叠面积作为这条边的权重。</li>
+<li><strong>成环</strong>：Tarjan 求强连通分量。分量内互不相交的物体<strong>合并成一层</strong>、保留真实深度（不切任何边）；只有真正穿插时才切重叠面积最小的边（静态边代价 ×4），并记住上一帧切的边，新方案不比它好 20% 就不换（滞回），避免来回闪。</li>
+<li><strong>分层</strong>：Kahn 拓扑求最长路径层级。槽位深度从 <code>相机深度 + 3200</code> 开始逐层朝相机推进，每层 30 cm 或合并组的厚度。</li>
+<li><strong>写回</strong>：用自定义图元数据（CPD）把槽位、轴心、保留系数传给材质。WPO：<code>s' = Slot + (s − Pivot) × Keep</code>，单个物体 <code>Keep = 0.02</code>（压扁），合并组 <code>Keep = 1</code>。<strong>只在主相机下推移</strong>：判断 <code>dot(ResolvedView.ViewForward, 相机前向) &gt; 0.999</code>，否则阴影拍摄也会被推歪。</li>
+</ol>
+<p>三根杆两两遮挡成环的情况，在 0° 偏航下包围盒不可能真正交织，展台 ④ 需要把相机转到 45° 才能演示。</p>
+
+<h2 id="s7">7. 光照、阴影、描边、抖动</h2>
+<ul>
+<li><strong>光照</strong>：Unlit 材质自己算 toon 明暗，位置用<strong>不含 WPO 的世界坐标</strong>（<code>WorldPosition</code> 节点选「排除所有着色器偏移」），排序推移不影响光照。这是不改引擎的关键：UE 的延迟光照用的是被推移后的深度，会算错。</li>
+<li><strong>阴影偏移</strong>：最近邻采样的深度图在掠射角会出条纹，用法线方向偏移 5 cm 加斜率偏移 <code>6 + 6 × min(tanθ, 6)</code>。阴影图要在光照参数定好之后同步拍，自动每帧拍会晚一帧，光源转动时整片阴影错位。</li>
+<li><strong>描边</strong>（后处理替换色调映射，在低分辨率下跑）：按自定义模板 ID 和深度找边，线画在<strong>较近的物体</strong>上（归前方）；地面内部按深度差找折线。再做 3×3 清理：去掉孤立点和 L 形拐角的多余点。输出 <code>pow(col, 1/2.2)</code> 并先除以 PreExposure。</li>
+<li><strong>抖动</strong>：只在 toon 色阶交界附近用 4×4 Bayer 图案过渡，不要对整张图的颜色做量化。物体空间锚点（随物体走）比屏幕空间（会在移动物体上滑动）稳定。</li>
+</ul>
+
+<h2 id="s8">8. 动画</h2>
+<ul>
+<li>直接在 C++ 的 <code>FAnimInstanceProxy::Evaluate</code> 里采样待机 / 行走两段动画，不需要动画蓝图。</li>
+<li><strong>阶跃关键帧</strong>：每圈固定取偶数个姿势（1.07 秒的走路取 8 个），按相位取样，不要按固定的每秒 8 帧取样。循环时长不是整数帧时，固定帧率取样每圈取到的姿势都不同，身体起伏的整格跳会时有时无，看起来像随机抽搐。</li>
+<li>阶跃模式下待机 / 行走的混合权重也取 0 或 1，中间值本身就是插值。</li>
+<li>朝向量化为 45° 一档：Actor 平滑转身，网格只显示量化后的朝向。</li>
+</ul>
+
+<h2 id="s9">9. 测量与自测</h2>
+<table><tr><th>命令行开关</th><th>作用</th></tr>
+<tr><td><code>-PixelCapture=&lt;目录&gt;</code></td><td>离屏跑完所有展台并截图，日志里有每张图的闪烁率与排序统计</td></tr>
+<tr><td><code>-PixelMotionTest [-PixelFollow=N] [-PixelMotionStraight]</code></td><td>自动按住斜向或向上走 3 秒，输出角色在屏幕上的抖动、背景滚动不均匀度、斜向同步换格比例</td></tr>
+<tr><td><code>-PixelFrameDump=&lt;目录&gt; [-PixelDumpFinal]</code></td><td>逐帧导出显示的画面（低分辨率或最终放大后），配合 <code>-benchmark -fps=60</code> 按真实帧节奏分析</td></tr>
+<tr><td><code>-PixelShadowMaskDebug / -PixelShadowSourceDebug</code></td><td>把角色影子涂成洋红，或按来源分色（角色 / 世界 / 两者）</td></tr>
+<tr><td><code>-PixelWalkTest</code>、<code>-PixelStartX= -PixelStartY=</code></td><td>验证能否移动；指定起点</td></tr>
+</table>
+<p>闪烁率用 GPU 回读：放大 pass 里把显示窗口 <code>AddEnqueueCopyPass</code> 到一组（6 个）轮换的 <code>FRHIGPUTextureReadback</code>，保证每一帧都能取到；比较相邻两帧，在 ±2 texel 内找最佳整格平移后统计仍不同的像素比例。<code>FViewport::ReadPixels</code> 在这条管线里取到的帧是相同的，测不出东西。场景颜色格式是 <code>PF_FloatR11G11B10</code>，需要自己解码。</p>
+<p>经验：只看「相机和角色的数值误差」会漏掉问题，最终要逐帧导出画面看。本工程的身体跳格、影子漂移都是逐帧看图才发现的。</p>
+
+<h2 id="s10">10. 坑点清单</h2>
+<table><tr><th>现象</th><th>原因</th><th>解决</th></tr>
+<tr><td>只能原地转身、走不动</td><td>地图没有 PlayerStart，角色生成在原点，一半埋在地里</td><td>GameMode 重写 <code>SpawnDefaultPawnAtTransform</code> 指定出生点</td></tr>
+<tr><td>地面出现整行红线</td><td>ISM 相邻实例之间有发丝缝，低分辨率下正好对上一行像素，露出侧面</td><td>实例 XY 缩放 1.004 互相覆盖</td></tr>
+<tr><td>描边 / 角色分层不生效</td><td>自定义深度没开，或物体没写模板</td><td><code>r.CustomDepth=3</code>，注册时 <code>SetRenderCustomDepth</code> + <code>SetCustomDepthStencilValue</code></td></tr>
+<tr><td>材质改动保存失败</td><td>Git LFS 的 lockable 属性让 .uasset 提交后变成只读</td><td>重建资产前去掉只读属性（<code>Tools/iterate.ps1</code>）</td></tr>
+<tr><td>动画 FBX 被导入成骨骼网格</td><td>自动导入会猜类型</td><td><code>automated_import_should_detect_type=False</code>、<code>original_import_type=FBXIT_ANIMATION</code>；多段动画导完后 <code>save_directory</code>，否则只存最后一段</td></tr>
+<tr><td><code>FParse::Value</code> 读不到逗号后的内容</td><td>默认遇到逗号就停</td><td>最后一个参数传 <code>false</code></td></tr>
+<tr><td>正交相机穿模 / 裁剪异常</td><td>近平面修正</td><td><code>r.Ortho.AllowNearPlaneCorrection=0</code>，显式设近远平面</td></tr>
+<tr><td>斜着走画面「先横后竖」</td><td>屏幕纵向被俯角压缩，横纵速度不同，两轴各自换格</td><td>按屏幕等速移动 + 沿 45° 线整体吸附</td></tr>
+</table>
+
+<h2 id="s11">11. 移植清单</h2>
+<table><tr><th>模块 / 文件</th><th>内容</th><th>依赖</th></tr>
+<tr><td><code>Source/PixelArtRender</code> + <code>Shaders/PixelUpscale.usf</code></td><td>低分辨率、整数放大、分层合成、角色影子合成、GPU 回读。与游戏逻辑无关，可原样拷贝</td><td>Renderer 私有头文件</td></tr>
+<tr><td><code>PixelCameraManager</code></td><td>正交相机、吸附、四种跟随方式</td><td>PixelArtRender</td></tr>
+<tr><td><code>PixelCharacter</code>、<code>PixelAnimInstance</code></td><td>网格根吸附（落地、斜向）、骨骼吸附（回差）、阶跃动画</td><td>相机状态</td></tr>
+<tr><td><code>PixelArtSubsystem</code></td><td>精灵注册与排序、三张阴影图、材质参数集</td><td>MPC_Pixel</td></tr>
+<tr><td><code>Tools/build_assets.py</code></td><td>以文本形式保存的材质 HLSL（排序 WPO、toon 光照与阴影、描边后处理），无头生成</td><td>Python 插件</td></tr>
+</table>
+<p>最小可用组合：只要「像素干净 + 跟随稳定」，拷贝 PixelArtRender、相机和角色吸附三部分即可；精灵排序和自建阴影可以之后按需加。</p>
+</main></div></body></html>

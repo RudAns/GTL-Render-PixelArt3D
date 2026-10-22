@@ -458,7 +458,7 @@ void UPixelHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 			Sum += (FVector2d(M[I].X, M[I].Y) - Mean / 9.0).Size(); ++N;
 		}
 		const double Wob = N ? Sum / N : 0.0;
-		WobbleValue->SetText(FText::FromString(FString::Printf(TEXT("%.2f texel · 跟随：%s"), Wob, PixelText::FollowModeName(S.FollowMode))));
+		WobbleValue->SetText(FText::FromString(FString::Printf(TEXT("%.2f texel"), Wob)));
 		WobbleValue->SetColorAndOpacity(FSlateColor(Wob < 0.05 ? FLinearColor(0.45f, 0.95f, 0.5f) : FLinearColor(1.f, 0.55f, 0.3f)));
 	}
 	SnapValue->SetText(FText::FromString(S.bCameraSnap
@@ -491,7 +491,7 @@ void UPixelHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		else
 		{
 			StationTitle->SetText(FText::FromString(TEXT("欢迎来到像素工坊")));
-			StationBody->SetText(FText::FromString(TEXT("岛上 6 个彩色踏板各拆解一项技术，沿石板路走上去就会出现说明。\n① 分辨率与 texel 密度　② 平移跑道　③ 墓室与长矛　④ 三杆成环　⑤ 描边与抖动　⑥ 转台\n想考考自己？按 C 开始「找穿帮」挑战。")));
+			StationBody->SetText(FText::FromString(TEXT("场景里 6 个彩色踏板各拆解一项技术，沿石板路走上去就会出现说明。\n① 分辨率与 texel 密度　② 平移跑道　③ 墓室与长矛　④ 三杆成环　⑤ 描边与抖动　⑥ 转台\n想考考自己？按 C 开始「找穿帮」挑战。")));
 		}
 	}
 
