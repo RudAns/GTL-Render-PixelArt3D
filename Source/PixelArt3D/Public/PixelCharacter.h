@@ -30,6 +30,8 @@ public:
 
 	/** Set by the turntable exhibit: spin in place. */
 	bool bSpin = false;
+	/** Screen direction the player is steering (-1/0/1 per axis, y up), set by the controller each frame. */
+	FIntPoint ScreenMoveDir = FIntPoint::ZeroValue;
 
 private:
 	FVector2d DiagonalAnchor = FVector2d::ZeroVector;

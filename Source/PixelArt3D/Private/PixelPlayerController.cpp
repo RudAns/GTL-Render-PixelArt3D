@@ -213,6 +213,7 @@ void APixelPlayerController::HandleKeys()
 		if (IsInputKeyDown(EKeys::D) || IsInputKeyDown(EKeys::Right)) Screen.X += 1;
 		if (IsInputKeyDown(EKeys::A) || IsInputKeyDown(EKeys::Left)) Screen.X -= 1;
 		if (WalkTestTime >= 0.f) { Screen.Y += 1; if (bMotionTest && !FParse::Param(FCommandLine::Get(), TEXT("PixelMotionStraight"))) Screen.X += 1; } // -PixelWalkTest / -PixelMotionTest[ -PixelMotionStraight]
+		if (APixelCharacter* PC = Cast<APixelCharacter>(P)) PC->ScreenMoveDir = FIntPoint(FMath::RoundToInt(FMath::Sign(Screen.X)), FMath::RoundToInt(FMath::Sign(Screen.Y)));
 		if (!Screen.IsNearlyZero())
 		{
 			Screen.Normalize();

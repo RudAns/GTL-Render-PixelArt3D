@@ -131,10 +131,12 @@ void APixelCharacter::Tick(float DeltaSeconds)
 		if (FMath::Abs(Pt.Y - ShownTexel.Y) >= 0.9) ShownTexel.Y = FMath::RoundToDouble(Pt.Y);
 		FVector2d Snapped = ShownTexel;
 		static const bool bOld = FParse::Param(FCommandLine::Get(), TEXT("PixelOldMove"));
-		const bool bDiagonal = !bOld && V.Size() > 20.0 && FMath::Abs(FMath::Abs(V.X) - FMath::Abs(V.Y)) < 0.15 * V.Size();
+		// Diagonal from the held keys, not the velocity: the velocity is still turning while the character
+		// accelerates, and every frame spent rounding x and y separately is a frame of left-then-up.
+		const bool bDiagonal = !bOld && ScreenMoveDir.X != 0 && ScreenMoveDir.Y != 0;
 		if (bDiagonal)
 		{
-			const FIntPoint Dir(V.X > 0 ? 1 : -1, V.Y > 0 ? 1 : -1);
+			const FIntPoint Dir = ScreenMoveDir;
 			auto Along = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.X + (Pt.Y - A.Y) * Dir.Y) * 0.5; };
 			auto Across = [&](const FVector2d& A) { return ((Pt.X - A.X) * Dir.Y - (Pt.Y - A.Y) * Dir.X) * 0.5; };
 			if (!bDiagonalAnchored || Dir != DiagonalDir || FMath::Abs(Across(DiagonalAnchor)) > 0.6)
