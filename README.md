@@ -86,3 +86,10 @@
 ### 资源
 
 角色、动画与场景道具来自 Kay Lousberg 的 KayKit Adventurers 2.0 与 Halloween Bits（CC0），源文件和许可证在 `SourceAssets/KayKit`。它们的贴图是渐变色条，网格 UV 落在色条上取色，正好适合 toon 色阶和低分辨率。只有密度石板和三根彩色横杆是程序生成的方块，用 16 texel/米 的贴图集（`Tools/gen_atlas.py`）。
+
+## 许可证
+
+本仓库自己编写的代码、脚本、着色器、文档和截图以 [MIT 许可证](LICENSE) 发布。下列第三方内容不在 MIT 范围内，仍按各自的许可使用：
+
+- 角色、动画与场景道具（`Content/KayKit`、`SourceAssets/KayKit`）：Kay Lousberg 的 KayKit，[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)，许可证原文在 `SourceAssets/KayKit`。
+- Unreal Engine 5.8：打开、编译和运行本工程需遵守 [Unreal Engine EULA](https://www.unrealengine.com/eula/unreal)。
