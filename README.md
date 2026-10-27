@@ -1,8 +1,23 @@
+<div align="center">
+
 # 把 3D 场景实时渲染成像素画
 
-从《Never's End》的 GDC 2026 讲座到 UE5：技术调研 + UE 5.8 可交互复现。
+**像素对齐相机 · 精灵排序 · Toon 光照 · 自建阴影 · 单像素描边 · 分层合成**<br>
+从《Never's End》的 GDC 2026 讲座出发，让 3D 场景实时呈现手绘像素画的观感：技术调研 + UE 5.8 可交互复现
+
+<a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-0a7bbb"></a>
+<img alt="引擎 UE 5.8" src="https://img.shields.io/badge/%E5%BC%95%E6%93%8E-UE_5.8-313131?logo=unrealengine">
+<img alt="代码 C++ · HLSL" src="https://img.shields.io/badge/%E4%BB%A3%E7%A0%81-C%2B%2B_%C2%B7_HLSL-00599c">
+<a href="Docs/Research.html"><img alt="调研 73 篇文献" src="https://img.shields.io/badge/%E8%B0%83%E7%A0%94-73_%E7%AF%87%E6%96%87%E7%8C%AE-e05d44"></a>
+<img alt="手游 可行" src="https://img.shields.io/badge/%E6%89%8B%E6%B8%B8-%E5%8F%AF%E8%A1%8C-2ea44f">
+
+[📥 下载调研报告](Docs/Research.html) · [📥 下载落地文档](Docs/Implementation.html) · [🎮 运行 Demo](#ue-58-可交互-demo) · [⌨️ 操作说明](#操作)
+
+<br>
 
 [![调研报告封面](Docs/shots/00_research_cover.png)](Docs/Research.html)
+
+</div>
 
 ## 调研报告
 
